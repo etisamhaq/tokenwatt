@@ -107,6 +107,14 @@ scheme", and testing K-quants is the obvious next experiment.
 The damage also grows with model size: the same scheme cost +228% perplexity on
 SmolLM2-135M and +926% here.
 
+**And it does not shrink the KV cache at all.** Dynamic quantization touches only
+Linear weights, so the cache stays fp32 — the measured curves for `fp32` and
+`int8-dynamic` are byte-identical, reaching 866 KiB after 24 decode steps, while
+bf16 reaches 433 KiB. Exactly half. For long-context work, where the cache rather
+than the weights dominates memory, int8-dynamic therefore offers no relief on the
+axis that matters, and bf16 offers a factor of two. That is a third independent
+reason to prefer bf16 (see `figures/kv_growth.png`).
+
 ## 4. Being on the Pareto frontier is not the same as being sensible
 
 The frontier contains `bf16/P-1t` and `int8-dynamic/P-1t`, the latter only because
@@ -185,7 +193,8 @@ a permission change mid-run cannot produce a half-measured dataset.
   placements, is untested — and is the most likely place these conclusions break.
 - **Perplexity and one needle probe** are a thin quality measure. They caught the
   int8 collapse decisively; a real evaluation suite would be better.
-- **24 tokens per generation** is short. KV cache growth is recorded but no
-  conclusion here depends on it — the one instrument that has not yet earned its
-  place.
+- **24 tokens per generation** is short. The KV cache measurement supports the
+  point in section 3 about int8 not shrinking the cache, but long-context
+  behaviour — where the cache overtakes the weights in memory footprint and the
+  energy picture may change — is not explored.
 - **No hardware performance counters**, so section 5 stays a hypothesis.

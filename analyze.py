@@ -34,6 +34,24 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_DOMAIN = "package-0"
 ENERGY_DOMAIN = DEFAULT_DOMAIN
 
+# Validated default categorical palette, light mode. Only the first three slots
+# clear the all-pairs colour-vision-deficiency floors, which is what a scatter
+# needs -- so colour carries the 3-level variable (precision) and marker shape
+# carries the 4-level one (core placement). Identity is therefore never
+# colour-alone, and the palette is never extended past its validated cap.
+SURFACE = "#fcfcfb"
+INK = "#0b0b0b"
+INK_MUTED = "#52514e"
+GRID = "#d8d7d2"
+PRECISION_COLOR = {
+    "fp32": "#2a78d6",           # slot 1, blue
+    "bf16": "#eb6834",           # slot 2, orange
+    "int8-dynamic": "#1baf7a",   # slot 3, aqua
+}
+PLACEMENT_MARKER = {
+    "P-1t": "o", "P-smt": "s", "E": "^", "LP-E": "D", "all": "P",
+}
+
 
 def load(path: Path) -> tuple[dict, list[dict]]:
     meta: dict = {}
@@ -201,44 +219,125 @@ def make_plots(summary: list[dict], loss: dict[str, float],
     written = []
 
     # --- 1. cost vs quality, frontier highlighted ---
-    pts = [(s["config"],
-            s["joules_per_token_med"] if energy else s["s_per_token_med"],
+    pts = [(s, s["joules_per_token_med"] if energy else s["s_per_token_med"],
             loss.get(s["config"]))
            for s in summary]
-    pts = [(c, x, q) for c, x, q in pts if x is not None and q is not None]
+    pts = [(s, x, q) for s, x, q in pts if x is not None and q is not None]
     if pts:
-        fig, ax = plt.subplots(figsize=(7, 5))
-        for c, x, q in pts:
-            on = c in frontier
-            ax.scatter(x, q * 100, s=90 if on else 45,
-                       marker="o" if on else "x",
-                       zorder=3 if on else 2,
-                       label="_nolegend_")
-            ax.annotate(c.replace("cpu/", ""), (x, q * 100),
-                        fontsize=7, xytext=(4, 4), textcoords="offset points")
-        fr = sorted([(x, q * 100) for c, x, q in pts if c in frontier])
+        fig, ax = plt.subplots(figsize=(7.5, 5.2))
+        fig.patch.set_facecolor(SURFACE)
+        ax.set_facecolor(SURFACE)
+
+        for s, x, q in pts:
+            on = s["config"] in frontier
+            ax.scatter(x, q * 100,
+                       s=170 if on else 95,
+                       c=PRECISION_COLOR.get(s["precision"], INK_MUTED),
+                       marker=PLACEMENT_MARKER.get(s["placement"], "o"),
+                       # 2px surface ring so overlapping marks stay separable
+                       edgecolors=SURFACE, linewidths=2.0,
+                       zorder=4 if on else 3)
+
+        fr = sorted((x, q * 100) for s, x, q in pts if s["config"] in frontier)
         if len(fr) > 1:
-            ax.plot([p[0] for p in fr], [p[1] for p in fr],
-                    linestyle="--", linewidth=1, zorder=1)
+            ax.plot([a for a, _ in fr], [b for _, b in fr], linestyle="--",
+                    linewidth=1.2, color=GRID, zorder=1)
+
+        # Label only the frontier -- the points the reader has to act on. A value
+        # beside all twelve is what made this plot unreadable before.
+        for s, x, q in pts:
+            if s["config"] in frontier:
+                ax.annotate(f"{s['precision']} / {s['placement']}",
+                            (x, q * 100), fontsize=8, color=INK,
+                            xytext=(9, 4), textcoords="offset points",
+                            zorder=5)
+
+        # Quality loss spans 0% to ~900%; symlog keeps the near-zero cluster
+        # readable without hiding the collapse. Linear below 1%, log above.
+        # q is a fraction; the axis is plotted in percent. Compare in percent.
+        if max(q for _, _, q in pts) * 100 > 20:
+            ax.set_yscale("symlog", linthresh=1.0)
+            ax.set_ylabel("quality loss vs best\n(% perplexity increase, symlog)",
+                          color=INK_MUTED, fontsize=9)
+        else:
+            ax.set_ylabel("quality loss vs best (% perplexity increase)",
+                          color=INK_MUTED, fontsize=9)
         ax.set_xlabel("joules per generated token" if energy
-                      else "seconds per generated token")
-        ax.set_ylabel("quality loss vs best (% perplexity increase)")
-        ax.set_title("Cost vs quality" + ("" if energy else "  (energy unmeasured)"))
-        ax.grid(alpha=0.3)
+                      else "seconds per generated token",
+                      color=INK_MUTED, fontsize=9)
+        ax.set_title("Cost vs quality — labelled points are non-dominated"
+                     + ("" if energy else "   (energy unmeasured)"),
+                     color=INK, fontsize=11, loc="left")
+
+        precisions = sorted({s["precision"] for s, _, _ in pts})
+        placements = sorted({s["placement"] for s, _, _ in pts})
+        col_handles = [plt.Line2D([], [], marker="o", linestyle="",
+                                  markersize=8, markeredgecolor=SURFACE,
+                                  markerfacecolor=PRECISION_COLOR.get(p, INK_MUTED),
+                                  label=p) for p in precisions]
+        mk_handles = [plt.Line2D([], [], marker=PLACEMENT_MARKER.get(p, "o"),
+                                 linestyle="", markersize=8, color=INK_MUTED,
+                                 markeredgecolor=SURFACE, label=p)
+                      for p in placements]
+        leg1 = ax.legend(handles=col_handles, title="precision", loc="upper left",
+                         bbox_to_anchor=(1.02, 1.0), frameon=False, fontsize=8,
+                         title_fontsize=8, labelcolor=INK_MUTED)
+        leg1.get_title().set_color(INK_MUTED)
+        ax.add_artist(leg1)
+        leg2 = ax.legend(handles=mk_handles, title="core placement",
+                         loc="upper left", bbox_to_anchor=(1.02, 0.55),
+                         frameon=False, fontsize=8, title_fontsize=8,
+                         labelcolor=INK_MUTED)
+        leg2.get_title().set_color(INK_MUTED)
+
+        ax.grid(color=GRID, linewidth=0.6, alpha=0.7)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("left", "bottom"):
+            ax.spines[spine].set_color(GRID)
+        ax.tick_params(colors=INK_MUTED, labelsize=8)
+
         p = outdir / "pareto.png"
-        fig.tight_layout(); fig.savefig(p, dpi=150); plt.close(fig)
+        fig.tight_layout(); fig.savefig(p, dpi=150, facecolor=SURFACE)
+        plt.close(fig)
         written.append(p)
 
     # --- 2. throughput by configuration ---
-    fig, ax = plt.subplots(figsize=(7, max(3, 0.4 * len(summary) + 1)))
+    fig, ax = plt.subplots(figsize=(7.5, max(3, 0.42 * len(summary) + 1)))
+    fig.patch.set_facecolor(SURFACE)
+    ax.set_facecolor(SURFACE)
     labels = [s["config"].replace("cpu/", "") for s in summary]
     vals = [s["decode_tok_per_s_med"] for s in summary]
     errs = [s["decode_tok_per_s_iqr"] / 2 for s in summary]
-    ax.barh(labels, vals, xerr=errs, capsize=3)
-    ax.set_xlabel("decode tokens/sec (median, error bars = IQR/2)")
-    ax.grid(axis="x", alpha=0.3)
+    colors = [PRECISION_COLOR.get(s["precision"], INK_MUTED) for s in summary]
+    ax.barh(labels, vals, xerr=errs, capsize=3, color=colors,
+            # 2px surface gap between adjacent bars
+            edgecolor=SURFACE, linewidth=2.0,
+            error_kw={"ecolor": INK_MUTED, "elinewidth": 1})
+    ax.set_xlabel("decode tokens/sec (median, error bars = IQR/2)",
+                  color=INK_MUTED, fontsize=9)
+    ax.set_title("Decode throughput", color=INK, fontsize=11, loc="left")
+    handles = [plt.Line2D([], [], marker="s", linestyle="", markersize=8,
+                          markeredgecolor=SURFACE,
+                          markerfacecolor=PRECISION_COLOR[k], label=k)
+               for k in sorted({s["precision"] for s in summary}
+                               & set(PRECISION_COLOR))]
+    if handles:
+        leg = ax.legend(handles=handles, title="precision", frameon=False,
+                        fontsize=8, title_fontsize=8, loc="lower right",
+                        labelcolor=INK_MUTED)
+        leg.get_title().set_color(INK_MUTED)
+    ax.grid(axis="x", color=GRID, linewidth=0.6, alpha=0.7)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(GRID)
+    ax.tick_params(colors=INK_MUTED, labelsize=8)
     p = outdir / "throughput.png"
-    fig.tight_layout(); fig.savefig(p, dpi=150); plt.close(fig)
+    fig.tight_layout(); fig.savefig(p, dpi=150, facecolor=SURFACE)
+    plt.close(fig)
     written.append(p)
 
     # --- 3. KV cache growth ---
@@ -247,17 +346,47 @@ def make_plots(summary: list[dict], loss: dict[str, float],
         if r.get("kv_bytes_by_step") and r["config"] not in series:
             series[r["config"]] = r["kv_bytes_by_step"]
     if series:
-        fig, ax = plt.subplots(figsize=(7, 4.5))
+        fig, ax = plt.subplots(figsize=(7.5, 4.5))
+        fig.patch.set_facecolor(SURFACE)
+        ax.set_facecolor(SURFACE)
+        # One line per precision: the curve depends on dtype (cache element size),
+        # not on where the threads run, so plotting all twelve would draw the same
+        # three lines four times over.
+        by_prec: dict[str, list[int]] = {}
         for cfg, ks in series.items():
+            prec = cfg.split("/")[1] if "/" in cfg else cfg
+            by_prec.setdefault(prec, ks)
+
+        # Precisions whose cache is byte-identical share one line and one legend
+        # entry. fp32 and int8-dynamic coincide because dynamic quantization only
+        # touches Linear weights -- the KV cache stays fp32 -- so drawing both
+        # would hide one series under the other and put a phantom in the legend.
+        merged: dict[tuple, list[str]] = {}
+        for prec, ks in by_prec.items():
+            merged.setdefault(tuple(ks), []).append(prec)
+        for ks, precs in merged.items():
+            precs.sort()
+            label = " = ".join(precs)
             ax.plot(range(1, len(ks) + 1), [k / 1024 for k in ks],
-                    label=cfg.replace("cpu/", ""), linewidth=1.4)
-        ax.set_xlabel("decode step")
-        ax.set_ylabel("KV cache (KiB)")
-        ax.set_title("KV cache growth during decode")
-        ax.legend(fontsize=7)
-        ax.grid(alpha=0.3)
+                    label=label, linewidth=2.0,
+                    color=PRECISION_COLOR.get(precs[0], INK_MUTED))
+        ax.set_xlabel("decode step", color=INK_MUTED, fontsize=9)
+        ax.set_ylabel("KV cache (KiB)", color=INK_MUTED, fontsize=9)
+        ax.set_title("KV cache growth during decode", color=INK, fontsize=11,
+                     loc="left")
+        leg = ax.legend(title="precision", frameon=False, fontsize=8,
+                        title_fontsize=8, labelcolor=INK_MUTED)
+        leg.get_title().set_color(INK_MUTED)
+        ax.grid(color=GRID, linewidth=0.6, alpha=0.7)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("left", "bottom"):
+            ax.spines[spine].set_color(GRID)
+        ax.tick_params(colors=INK_MUTED, labelsize=8)
         p = outdir / "kv_growth.png"
-        fig.tight_layout(); fig.savefig(p, dpi=150); plt.close(fig)
+        fig.tight_layout(); fig.savefig(p, dpi=150, facecolor=SURFACE)
+        plt.close(fig)
         written.append(p)
 
     return written
