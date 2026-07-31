@@ -131,6 +131,36 @@ def measure_idle(seconds: float) -> dict[str, float] | None:
         return None
 
 
+def measure_idle_settled(seconds: float, settle: float = 15.0,
+                         tolerance: float = 0.10, attempts: int = 3,
+                         domain: str = "package-0"
+                         ) -> tuple[dict[str, float] | None, bool]:
+    """Idle power measured only once it has stopped moving.
+
+    Returns (watts, stable). A baseline taken immediately after a burst of work
+    captures the CPU decaying out of turbo rather than true idle, and how far it
+    has decayed depends on timing nobody controls. Measured that way, per-config
+    baselines on this machine ranged 5.5-13.2 W -- a 2.2x spread against gross
+    power that varied only 10% -- and the resulting net energy was dominated by
+    baseline artifact rather than signal. See runs/failed-perconfig-baseline/.
+
+    So: wait `settle` seconds doing nothing, then take two consecutive windows
+    and require them to agree within `tolerance` before believing either."""
+    time.sleep(settle)
+    prev = measure_idle(seconds)
+    if prev is None:
+        return None, False
+    for _ in range(attempts - 1):
+        cur = measure_idle(seconds)
+        if cur is None:
+            return prev, False
+        a, b = prev.get(domain), cur.get(domain)
+        if a and b and abs(a - b) / max(a, b) <= tolerance:
+            return cur, True
+        prev = cur
+    return prev, False
+
+
 def peak_rss_bytes() -> int:
     # ru_maxrss is kilobytes on Linux.
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
@@ -139,7 +169,8 @@ def peak_rss_bytes() -> int:
 def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
             run_idle_watts: dict[str, float] | None, corpus: str,
             run_quality: bool, seed: int, needle_repeats: int = 40,
-            measure_energy: bool = True, idle_seconds: float = 10.0
+            measure_energy: bool = True, idle_seconds: float = 10.0,
+            baseline_mode: str = "run"
             ) -> tuple[list[dict], dict[str, float] | None]:
     """Load one configuration, warm it up, baseline it, then measure `repeats`.
 
@@ -156,10 +187,16 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
         # Thermal soak / cache warm. Discarded.
         backend.generate(PROMPTS[0], max_new_tokens=min(8, max_new_tokens))
 
-        # Per-configuration idle baseline. Deliberately measured HERE: after the
-        # model is resident and after warmup, so the thermal state and the
-        # affinity mask match the generations it will be subtracted from.
-        idle_watts = measure_idle(idle_seconds) if measure_energy else None
+        # Baseline. "run" reuses one baseline measured on a quiet machine before
+        # any load; "per-config" re-measures here, but only after settling, since
+        # an unsettled baseline is worse than a slightly stale one.
+        idle_stable = True
+        if not measure_energy:
+            idle_watts = None
+        elif baseline_mode == "per-config":
+            idle_watts, idle_stable = measure_idle_settled(idle_seconds)
+        else:
+            idle_watts = run_idle_watts
 
         qual = None
         if run_quality:
@@ -229,6 +266,8 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
                 "joules_gross": joules or None,
                 "joules_net": net_joules or None,
                 "idle_watts_config": idle_watts or None,
+                "baseline_mode": baseline_mode,
+                "baseline_stable": idle_stable,
                 "net_negative_domains": negative_domains or None,
                 "joules_per_new_token": (
                     {k: v / gen.n_new_tokens for k, v in
@@ -270,6 +309,11 @@ def main() -> int:
     ap.add_argument("--max-new-tokens", type=int, default=32)
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--idle-seconds", type=float, default=10.0)
+    ap.add_argument("--baseline", choices=("run", "per-config"), default="run",
+                    help="'run' (default) uses one baseline measured before any "
+                         "load; 'per-config' re-measures per configuration after "
+                         "a settle period. per-config is more principled but "
+                         "noisier in practice - see FINDINGS.md")
     ap.add_argument("--corpus-chars", type=int, default=4000)
     ap.add_argument("--no-quality", action="store_true")
     ap.add_argument("--needle-repeats", type=int, default=40,
@@ -312,9 +356,9 @@ def main() -> int:
         raise SystemExit("RAPL readable but idle baseline failed - aborting "
                          "rather than record gross-only energy")
     if idle:
-        print("idle(ref): " + ", ".join(f"{k}={v:.2f}W" for k, v in
+        print("idle     : " + ", ".join(f"{k}={v:.2f}W" for k, v in
                                         sorted(idle.items())))
-        print("           (reference only; each config is baselined separately)")
+        print(f"baseline : {a.baseline}")
 
     corpus = quality_mod.load_corpus(max_chars=a.corpus_chars)
     baselines: dict[str, dict[str, float]] = {}
@@ -333,7 +377,8 @@ def main() -> int:
                     idle, corpus, not a.no_quality, a.seed,
                     needle_repeats=a.needle_repeats,
                     measure_energy=measure_energy,
-                    idle_seconds=a.idle_seconds)
+                    idle_seconds=a.idle_seconds,
+                    baseline_mode=a.baseline)
             except NotImplementedError as e:
                 print(f"skipped ({e})")
                 continue
