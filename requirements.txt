@@ -1,0 +1,10 @@
+# Tested with the versions in the right-hand comments on Python 3.10.
+#
+# torch is CPU-only here; if pip pulls the CUDA build and you do not want it:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.4            # tested: 2.7.1
+transformers>=4.44    # tested: 4.45.0
+numpy>=1.24           # tested: 1.26.4
+
+# analyze.py only. Everything else runs without it; plots are skipped if absent.
+matplotlib>=3.7       # tested: 3.10.0

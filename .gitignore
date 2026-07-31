@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.log
+.venv/
+# Figures under runs/ ARE committed - they are the point of the repo.
