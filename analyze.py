@@ -102,6 +102,20 @@ def summarise(rows: list[dict]) -> list[dict]:
     return out
 
 
+def baseline_mode_of(rows: list[dict]) -> str:
+    """Which baseline method the DATA actually used.
+
+    Read from the rows rather than assumed, because a report that asserts a
+    methodology the data did not use is worse than one that says nothing. Rows
+    predating the `baseline_mode` field came from the single run-level baseline."""
+    modes = {r.get("baseline_mode") for r in rows if r.get("baseline_mode")}
+    if not modes:
+        return "run"
+    if len(modes) > 1:
+        return "mixed(" + ",".join(sorted(modes)) + ")"
+    return modes.pop()
+
+
 def baseline_report(summary: list[dict]) -> str | None:
     """Spread of the per-configuration idle baseline.
 
@@ -295,12 +309,20 @@ def main() -> int:
         "",
     ]
     if energy:
-        header += [
-            f"Energy from RAPL `{ENERGY_DOMAIN}`, net of a per-configuration "
-            "idle baseline measured after load and warmup under the same "
-            "affinity mask.",
-            "",
-        ]
+        mode = baseline_mode_of(rows)
+        if mode == "run":
+            ref = (meta.get("idle_watts_reference")
+                   or meta.get("idle_watts") or {}).get(ENERGY_DOMAIN)
+            desc = ("net of a single run-level idle baseline"
+                    + (f" of {ref:.2f} W" if ref else "")
+                    + ", measured before any load")
+        elif mode == "per-config":
+            desc = ("net of a per-configuration idle baseline, measured after a "
+                    "settle period and verified stable across two windows")
+        else:
+            desc = (f"net of a **{mode}** baseline — configurations were not "
+                    "baselined the same way and are not directly comparable")
+        header += [f"Energy from RAPL `{ENERGY_DOMAIN}`, {desc}.", ""]
         bl = baseline_report(summary)
         if bl:
             header += [bl, ""]

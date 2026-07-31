@@ -4,7 +4,7 @@ Model: `Qwen/Qwen2.5-0.5B-Instruct`  ·  5 repeats per configuration  ·  24 new
 
 Machine: x86_64 — P 6c/12t @ 4.8GHz, E 8c/8t @ 3.8GHz, LP-E 2c/2t @ 2.5GHz
 
-Energy from RAPL `package-0`, net of a per-configuration idle baseline measured after load and warmup under the same affinity mask.
+Energy from RAPL `package-0`, net of a single run-level idle baseline of 10.45 W, measured before any load.
 
 ## Per-configuration summary
 

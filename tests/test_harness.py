@@ -281,6 +281,23 @@ def test_summarise_marks_energy_absent():
     assert s["joules_per_token_med"] is None
 
 
+def test_baseline_mode_defaults_to_run_for_old_rows():
+    """Rows written before the field existed used the single run-level baseline;
+    the report must not claim a method the data did not use."""
+    assert analyze.baseline_mode_of([{"config": "c"}]) == "run"
+
+
+def test_baseline_mode_read_from_rows():
+    assert analyze.baseline_mode_of(
+        [{"baseline_mode": "per-config"}] * 3) == "per-config"
+
+
+def test_baseline_mode_flags_mixed_data():
+    out = analyze.baseline_mode_of([{"baseline_mode": "run"},
+                                    {"baseline_mode": "per-config"}])
+    assert out.startswith("mixed(")
+
+
 def test_baseline_report_none_below_two_samples():
     assert analyze.baseline_report([]) is None
     assert analyze.baseline_report([{"idle_w": 10.0}]) is None
