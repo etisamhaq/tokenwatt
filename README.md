@@ -32,32 +32,55 @@ thing an energy study is about.
 
 ## Results
 
-**[`FINDINGS.md`](FINDINGS.md)** — the claims, written by hand.
-Generated tables and plots live under `runs/<model>/`.
-
-![Cost versus quality](runs/qwen2.5-0.5b/figures/pareto.png)
+**[`FINDINGS.md`](FINDINGS.md)** — the claims, written by hand. Generated tables
+and plots live under `runs/<model>/`.
 
 Headline, from Qwen2.5-0.5B-Instruct across 12 configurations with joules measured:
 
-| | J/token | tok/s | perplexity | needle |
-| --- | --- | --- | --- | --- |
-| **bf16 / P-cores, 1 thread each** | **0.269** | 17.7 | 11.091 | 3/3 |
-| bf16 / E-cores | 0.353 | 14.4 | 11.091 | 3/3 |
-| bf16 / LP-E cores | 0.621 | 7.4 | 11.091 | 3/3 |
-| fp32 / P-cores | 0.376 | 9.5 | 11.178 | 3/3 |
-| int8-dynamic / P-cores | 0.266 | 36.3 | **113.763** | **0/3** |
+| | J/token | tok/s | net W | perplexity | needle |
+| --- | --- | --- | --- | --- | --- |
+| **bf16 / P-cores, 1 thread each** | **0.269** | 17.7 | 4.78 | 11.091 | 3/3 |
+| bf16 / P-cores, all 12 threads | 0.299 | 14.8 | 4.41 | 11.091 | 3/3 |
+| bf16 / E-cores | 0.353 | 14.4 | 5.10 | 11.091 | 3/3 |
+| bf16 / LP-E cores | 0.621 | 7.4 | 4.58 | 11.091 | 3/3 |
+| fp32 / P-cores, 1 thread each | 0.376 | 9.5 | 3.55 | 11.178 | 3/3 |
+| int8-dynamic / P-cores | 0.266 | 36.3 | 9.65 | **113.763** | **0/3** |
 
-Three things fall out:
+Three things fall out.
 
-1. **The efficiency cores are not energy-efficient here.** LP-E costs 2.3× the
-   joules per token of the performance cores, and E-cores 31% more. Low power
-   draw loses to shorter runtime — race-to-idle wins even on a memory-bound
-   workload. A throughput-only study gets this backwards.
-2. **bf16 strictly dominates fp32**: 28% less energy, 86% more throughput, and
-   marginally better perplexity. No tradeoff at all.
-3. **int8-dynamic is 2× faster and unusable** — perplexity ×10, needle retrieval
-   gone — for a 1.2% energy saving. The lesson is about quantization
-   *granularity*, not bit width: per-tensor scaling is the wrong scheme.
+**1. The efficiency cores are not energy-efficient here.** LP-E costs 2.31x the
+joules per token of the performance cores. The mechanism is in the `net W` column:
+LP-E and P-1t draw within **4%** of each other while throughput differs **2.39x**,
+so the entire energy penalty is duration. The low-power island does not run at low
+power on this workload — it runs at the same power for 2.4x as long. Race-to-idle,
+measured. A throughput-only study reaches this ranking by accident here, and the
+wrong one on the smaller model.
+
+**2. bf16 strictly dominates fp32** — 28% less energy, 86% more throughput, and
+marginally better perplexity. No tradeoff on any axis measured.
+
+**3. int8-dynamic bought latency, not energy.** It runs at 2.05x the throughput of
+bf16 and draws 2.02x the power, so joules per token come out unchanged (0.266
+against 0.269) — while perplexity rises tenfold and needle retrieval disappears
+entirely. The lesson concerns quantization *granularity* rather than bit width:
+PyTorch scales per tensor, whereas GGUF K-quants scale per block and are reported
+to hold quality at 4 bits.
+
+Plots are in `runs/<model>/figures/`. The scatter plot's point labels currently
+collide and need laying out properly before it is worth reading.
+
+## Runs
+
+| Directory | What it is |
+| --- | --- |
+| `runs/qwen2.5-0.5b/` | The clean dataset the findings rest on — 12 configurations, 5 repeats, single run-level baseline |
+| `runs/smollm2-135m/` | Smaller model, same matrix, no energy (measured before RAPL access) |
+| `runs/discarded/` | Half-measured energy after a mid-run permission change. Kept as a record |
+| `runs/failed-perconfig-baseline/` | A baseline "improvement" that made the data 11x noisier. Kept, and explained |
+
+The two failed runs are committed on purpose. Both are written up in their own
+`NOTE.md`, and the second is why `--baseline per-config` now settles and verifies
+stability before trusting a reading.
 
 ## Install
 
@@ -72,7 +95,7 @@ by default; for CPU only use
 ## Quick start
 
 ```bash
-make test                              # 31 unit tests, no model needed
+make test                              # 39 unit tests, no model needed
 make check                             # islands + RAPL status
 python3 topology.py                    # what islands does this machine have?
 python3 energy.py --selftest           # can we read RAPL?
@@ -136,11 +159,11 @@ of result gets dismissed. The harness enforces:
 | `topology.py` | Frequency-based island classification, SMT handling, affinity pinning |
 | `backends.py` | Backend interface; PyTorch CPU implementation with manual decode loop |
 | `quality.py` | Perplexity + needle-in-context probe at several depths |
-| `runner.py` | Configuration matrix, measurement loop, `results.jsonl` |
-| `analyze.py` | Median/IQR, Pareto frontier, plots, `RESULTS.md` |
+| `runner.py` | Configuration matrix, measurement loop, `results.jsonl`. `--baseline {run,per-config}` |
+| `analyze.py` | Median/IQR, Pareto frontier, plots, per-model `RESULTS.md` |
 | `corpus.txt` | Fixed perplexity corpus: 12 kB of *Alice in Wonderland*, public domain, via Project Gutenberg. **Do not edit** — changing it invalidates every perplexity number |
 | `chat.py` | Interactive prompt against one configuration |
-| `tests/` | 28 unit tests for the logic that would silently corrupt results |
+| `tests/` | 39 unit tests over the logic that would corrupt results without failing |
 
 Island classification uses `cpuinfo_max_freq` rather than a hardcoded CPU model, so
 it degrades sensibly elsewhere: a homogeneous CPU yields a single tier. Meteor Lake
