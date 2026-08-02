@@ -1,4 +1,4 @@
-# Where do the Joules Go?
+# ⚡ TokenWatt
 
 > **Energy, latency, and quality of LLM inference across the three CPU power islands of an Intel Core Ultra 7 155H, measured with Intel RAPL counters rather than estimated.**
 
@@ -470,8 +470,8 @@ which now verifies stability before trusting an idle baseline measurement.
 ## Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository>
+git clone https://github.com/etisamhaq/tokenwatt.git
+cd tokenwatt
 ```
 
 ---
@@ -1013,21 +1013,6 @@ While latency benchmarks are common,
 ground-truth energy measurements for heterogeneous consumer processors are surprisingly rare.
 
 This repository is the dataset and benchmarking framework I wanted to find—but couldn't.
-
----
-
-# Citation
-
-If this repository contributes to your research or engineering work, please consider citing it.
-
-```text
-@software{where_do_the_joules_go,
-  title   = {Where do the Joules Go?},
-  author  = {Your Name},
-  year    = {2026},
-  url     = {https://github.com/your-repository}
-}
-```
 
 ---
 
