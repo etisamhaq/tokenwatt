@@ -16,7 +16,7 @@ authors:
     email: 2026SMSDS122@student.uet.edu.pk
     orcid: "https://orcid.org/0009-0008-5016-6478"
 repository-code: "https://github.com/etisamhaq/tokenwatt"
-doi: "10.5281/zenodo.23243517"
+doi: "10.5281/zenodo.23243516"  # concept DOI -- always resolves to the latest version
 license: MIT
 keywords:
   - energy measurement
@@ -26,5 +26,5 @@ keywords:
   - heterogeneous multicore
   - quantization
   - sustainable computing
-version: "1.0.0"
-date-released: "2026-10-08"
+version: "1.0.2"
+date-released: "2026-10-09"
