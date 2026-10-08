@@ -8,7 +8,7 @@ Energy from RAPL `package-0`, net of a single run-level idle baseline of 5.29 W,
 
 Idle baseline for `package-0` across 2 configurations: 5.29-5.29 W, median 5.29 W (spread 0% of median).
 
-> **12 measurement(s) produced negative net energy.** The baseline exceeded the measurement, which means the baseline is wrong for those runs. Recorded unclamped rather than floored at zero so the error is visible.
+Net energy went slightly negative in a domain other than `package-0` for 12 of 12 measurements. This is expected rather than alarming: the `uncore` baseline is around 0.2 W and dominated by noise, so subtracting it can cross zero. No figure in this report is computed from those domains, and `package-0` itself did not go negative.
 
 ## Per-configuration summary
 

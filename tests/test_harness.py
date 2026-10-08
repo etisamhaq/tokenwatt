@@ -11,6 +11,7 @@ Run:  python3 -m pytest tests/ -q      (or: python3 tests/test_harness.py)
 
 import os
 import sys
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -326,15 +327,19 @@ def test_baseline_report_ignores_missing_values():
 
 def test_summarise_counts_negative_net_energy():
     """Negative net energy means a bad baseline; it must be surfaced, not
-    silently averaged away."""
+    silently averaged away -- and attributed to the right domain, because only
+    a negative in the reported domain invalidates a figure."""
     base = {"config": "c", "engine": "cpu", "precision": "fp32",
             "placement": "all", "threads": 4, "decode_tok_per_s": 10.0,
             "prefill_s": 0.1, "joules_per_new_token": {"package-0": 1.0},
             "param_bytes": 1, "peak_rss_bytes": 10, "kv_bytes_final": 5,
             "perplexity": 2.0, "idle_watts_config": {"package-0": 9.5}}
-    rows = [dict(base), dict(base, net_negative_domains=["package-0"])]
+    rows = [dict(base),
+            dict(base, net_negative_domains=["package-0"]),
+            dict(base, net_negative_domains=["uncore"])]
     s = analyze.summarise(rows)[0]
-    assert s["n_negative_net"] == 1
+    assert s["n_negative_reported"] == 1
+    assert s["n_negative_other"] == 1
     assert s["idle_w"] == 9.5
 
 
@@ -483,9 +488,17 @@ def test_trials_are_a_full_prompt_by_repeat_cross():
 
 
 def test_label_placement_separates_coincident_points():
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    # matplotlib is an optional dependency: analyze.py guards its import and
+    # skips plotting when it is absent, and requirements.txt says so. A test
+    # that imports it unconditionally fails the whole suite in a configuration
+    # the project explicitly supports. unittest.SkipTest is used because pytest
+    # understands it natively and _run_all() handles it below.
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise unittest.SkipTest("matplotlib not installed; plotting is optional")
     fig, ax = plt.subplots()
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
     analyze.place_labels(ax, [(0.5, 0.5, "alpha"), (0.5, 0.5, "beta"),
@@ -546,19 +559,52 @@ def test_warmup_uses_full_measurement_length():
     assert seen == [256, 256]
 
 
+
+def test_negative_net_is_counted_per_domain():
+    """A clean dataset once reported "237 of 240 measurements produced negative
+    net energy" because uncore noise was pooled with the reported domain."""
+    rows = [{"config": "c", "engine": "cpu", "precision": "bf16",
+             "placement": "P-1t", "threads": 1, "prompt_index": 0, "repeat": i,
+             "decode_tok_per_s": 10.0, "prefill_s": 0.1, "param_bytes": 1,
+             "peak_rss_bytes": 1, "kv_bytes_final": 1, "window_s": 1.0,
+             "joules_net": {analyze.ENERGY_DOMAIN: 5.0, "uncore": -0.3},
+             "joules_per_new_token": {analyze.ENERGY_DOMAIN: 0.5},
+             "net_negative_domains": ["uncore"]} for i in range(3)]
+    sm = analyze.summarise(rows)[0]
+    assert sm["n_negative_reported"] == 0, "uncore noise must not be charged to the reported domain"
+    assert sm["n_negative_other"] == 3
+
+
+def test_negative_net_in_reported_domain_is_flagged():
+    rows = [{"config": "c", "engine": "cpu", "precision": "bf16",
+             "placement": "P-1t", "threads": 1, "prompt_index": 0, "repeat": i,
+             "decode_tok_per_s": 10.0, "prefill_s": 0.1, "param_bytes": 1,
+             "peak_rss_bytes": 1, "kv_bytes_final": 1, "window_s": 1.0,
+             "joules_net": {analyze.ENERGY_DOMAIN: -2.0},
+             "joules_per_new_token": {analyze.ENERGY_DOMAIN: -0.2},
+             "net_negative_domains": [analyze.ENERGY_DOMAIN]} for i in range(3)]
+    sm = analyze.summarise(rows)[0]
+    assert sm["n_negative_reported"] == 3
+    assert sm["n_negative_other"] == 0
+
+
 # ----------------------------------------------------------------- main
 def _run_all() -> int:
     fns = [(n, f) for n, f in sorted(globals().items())
            if n.startswith("test_") and callable(f)]
-    failed = []
+    failed, skipped = [], []
     for name, fn in fns:
         try:
             fn()
             print(f"  pass  {name}")
+        except unittest.SkipTest as e:
+            skipped.append((name, e))
+            print(f"  skip  {name}: {e}")
         except Exception as e:                      # noqa: BLE001
             failed.append((name, e))
             print(f"  FAIL  {name}: {type(e).__name__}: {e}")
-    print(f"\n{len(fns) - len(failed)}/{len(fns)} passed")
+    tail = f", {len(skipped)} skipped" if skipped else ""
+    print(f"\n{len(fns) - len(failed) - len(skipped)}/{len(fns)} passed{tail}")
     return 1 if failed else 0
 
 

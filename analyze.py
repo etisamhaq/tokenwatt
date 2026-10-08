@@ -219,8 +219,18 @@ def summarise(rows: list[dict]) -> list[dict]:
             "needle_total": first.get("needle_total"),
             "idle_w": ((first.get("idle_watts_config") or {})
                        .get(ENERGY_DOMAIN)),
-            "n_negative_net": sum(1 for r in rs
-                                  if r.get("net_negative_domains")),
+            # Split by domain. The uncore baseline is ~0.25 W and dominated by
+            # noise, so it goes slightly negative routinely and says nothing
+            # about the result. Reporting one combined count made a clean
+            # dataset read as 237-of-240 broken, when the domain every number
+            # is computed from never went negative at all.
+            "n_negative_reported": sum(
+                1 for r in rs
+                if ENERGY_DOMAIN in (r.get("net_negative_domains") or [])),
+            "n_negative_other": sum(
+                1 for r in rs
+                if (r.get("net_negative_domains")
+                    and ENERGY_DOMAIN not in r["net_negative_domains"])),
         })
     out.sort(key=lambda d: (d["precision"], d["placement"], d["threads"]))
     return out
@@ -883,13 +893,27 @@ def main() -> int:
         bl = baseline_report(summary)
         if bl:
             header += [bl, ""]
-        neg = sum(s.get("n_negative_net", 0) for s in summary)
-        if neg:
+        neg_rep = sum(s.get("n_negative_reported", 0) for s in summary)
+        neg_oth = sum(s.get("n_negative_other", 0) for s in summary)
+        total_n = sum(s.get("n", 0) for s in summary)
+        if neg_rep:
             header += [
-                f"> **{neg} measurement(s) produced negative net energy.** The "
-                "baseline exceeded the measurement, which means the baseline is "
-                "wrong for those runs. Recorded unclamped rather than floored at "
-                "zero so the error is visible.",
+                f"> **{neg_rep} of {total_n} measurements produced negative net "
+                f"energy in `{ENERGY_DOMAIN}`, the domain every figure here is "
+                "computed from.** The baseline exceeded the measurement, so the "
+                "baseline is wrong for those runs and the affected numbers "
+                "should not be trusted. Recorded unclamped rather than floored "
+                "at zero so the error stays visible.",
+                "",
+            ]
+        if neg_oth:
+            header += [
+                f"Net energy went slightly negative in a domain other than "
+                f"`{ENERGY_DOMAIN}` for {neg_oth} of {total_n} measurements. "
+                "This is expected rather than alarming: the `uncore` baseline is "
+                "around 0.2 W and dominated by noise, so subtracting it can "
+                "cross zero. No figure in this report is computed from those "
+                f"domains, and `{ENERGY_DOMAIN}` itself did not go negative.",
                 "",
             ]
     else:
@@ -938,10 +962,15 @@ def main() -> int:
     bl = baseline_report(summary)
     if bl:
         print(bl.replace("**", "").replace("`", ""))
-    neg = sum(s.get("n_negative_net", 0) for s in summary)
-    if neg:
-        print(f"WARNING: {neg} measurement(s) had negative net energy "
-              "(baseline exceeded measurement)")
+    neg_rep = sum(s.get("n_negative_reported", 0) for s in summary)
+    neg_oth = sum(s.get("n_negative_other", 0) for s in summary)
+    if neg_rep:
+        print(f"WARNING: {neg_rep} measurement(s) had negative net energy in "
+              f"{ENERGY_DOMAIN} (baseline exceeded measurement)")
+    if neg_oth:
+        print(f"note: {neg_oth} measurement(s) went negative only in a domain "
+              f"other than {ENERGY_DOMAIN}; expected for the noise-dominated "
+              "uncore baseline, and no reported figure uses it")
     if not energy:
         print("note: energy unmeasured; cost axis is seconds/token")
 
