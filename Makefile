@@ -1,4 +1,4 @@
-.PHONY: help test check sweep sweep-big sweep-longctx reproduce analyze clean rapl idle
+.PHONY: help test check sweep sweep-big sweep-longctx sweep-kquant kquant-perplexity reproduce analyze clean rapl idle
 .DEFAULT_GOAL := help
 
 PY      ?= python3
@@ -23,7 +23,9 @@ help:
 	@echo "make sweep       full sweep, small model      (MODEL=$(MODEL))"
 	@echo "make sweep-big   full sweep, larger model     (BIG=$(BIG))"
 	@echo "make sweep-longctx  1024-token run, bf16, best vs worst island"
-	@echo "make reproduce   all three runs, exactly as published (~4 h)"
+	@echo "make sweep-kquant     GGUF K-quants via llama.cpp (needs models/, see models/README.md)"
+	@echo "make kquant-perplexity quality for the GGUF schemes, measured separately"
+	@echo "make reproduce   all published runs (~5 h)"
 	@echo "make analyze     regenerate RESULTS.md and figures/ from results.jsonl"
 	@echo "make clean       remove generated results, figures and caches"
 
@@ -78,7 +80,27 @@ sweep-longctx:
 	$(PY) analyze.py --results runs/longctx-1024/results.jsonl \
 	  --report runs/longctx-1024/RESULTS.md --outdir runs/longctx-1024/figures
 
-reproduce: sweep-big sweep sweep-longctx
+# GGUF K-quants through llama.cpp. Q8_0 is the one that matters for the
+# granularity argument: 8-bit like PyTorch's per-tensor dynamic int8, so
+# comparing them holds bit width constant. Needs `pip install llama-cpp-python`
+# and the weights in models/ -- see models/README.md.
+sweep-kquant:
+	$(PY) runner.py --engines llamacpp --precisions gguf-q4_k_m \
+	  --placements P-1t,LP-E --prompts $(PROMPTS) --repeats 3 \
+	  --max-new-tokens $(TOKENS) --idle-seconds 20 --no-quality \
+	  --out runs/kquant/results.jsonl
+	$(PY) runner.py --engines llamacpp --precisions gguf-q8_0 \
+	  --placements P-1t,LP-E --prompts $(PROMPTS) --repeats 3 \
+	  --max-new-tokens $(TOKENS) --idle-seconds 20 --no-quality \
+	  --out runs/kquant-q8/results.jsonl
+
+# Separate from the energy sweep on purpose: perplexity needs logits_all=True,
+# which costs about half the decode throughput and would corrupt any energy
+# figure measured under it.
+kquant-perplexity:
+	$(PY) kquant_perplexity.py
+
+reproduce: sweep-big sweep sweep-longctx sweep-kquant kquant-perplexity
 
 analyze:
 	$(PY) analyze.py --results runs/qwen2.5-0.5b-v3/results.jsonl \
