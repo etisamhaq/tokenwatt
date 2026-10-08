@@ -18,6 +18,12 @@
 \usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
 
+% Double-anonymized review: \anontrue hides every identifying detail and the
+% identifying information goes in title_page.tex instead. Set \anonfalse for
+% the camera-ready version and for arXiv.
+\newif\ifanon
+\anontrue
+
 \newif\ifdraftmode
 \draftmodefalse
 \ifdraftmode
@@ -31,16 +37,28 @@
 \title{Race to Idle: Why Efficiency Cores Do Not Save Energy\\
 for LLM Decode on x86 Heterogeneous SoCs}
 
-\author{Muhammad~Etisam~Ul~Haq%
-\thanks{M. E. Ul Haq is with the Institute of Data Science, University of
-Engineering and Technology, Lahore, Pakistan
-(e-mail: 2026SMSDS122@student.uet.edu.pk).}%
-\thanks{ORCID: \url{https://orcid.org/0009-0008-5016-6478}.}%
-\thanks{Artifact, including the measurement harness, the complete dataset and
-every discarded run, is archived at \href{https://doi.org/10.5281/zenodo.23243517}{doi:10.5281/zenodo.23243517}.}}
-
-\markboth{IEEE Transactions on Sustainable Computing}%
-{Ul Haq: Race to Idle}
+\ifanon
+  \author{Anonymous Author(s)%
+  \thanks{Author and affiliation details are withheld for double-anonymized
+  review and are supplied on the separate title page.}%
+  \thanks{The artifact---measurement harness, complete dataset and every
+  discarded run---is archived under a permanent DOI, withheld here because the
+  repository identifies the author. It is supplied on the title page and will
+  be stated in the camera-ready version.}}
+  \markboth{IEEE Transactions on Sustainable Computing}%
+  {Anonymous Submission: Race to Idle}
+\else
+  \author{Muhammad~Etisam~Ul~Haq%
+  \thanks{M. E. Ul Haq is with the Institute of Data Science, University of
+  Engineering and Technology, Lahore, Pakistan
+  (e-mail: 2026SMSDS122@student.uet.edu.pk).}%
+  \thanks{ORCID: \url{https://orcid.org/0009-0008-5016-6478}.}%
+  \thanks{Artifact, including the measurement harness, the complete dataset and
+  every discarded run, is archived at
+  \href{https://doi.org/10.5281/zenodo.23243517}{doi:10.5281/zenodo.23243517}.}}
+  \markboth{IEEE Transactions on Sustainable Computing}%
+  {Ul Haq: Race to Idle}
+\fi
 
 \maketitle
 
@@ -996,10 +1014,22 @@ inference across heterogeneous cores: does package power vary across islands
 for this workload? If it does not, there is nothing to trade, and the right
 policy is to race to idle.
 
+\section*{Acknowledgment}
+The author used Anthropic's Claude (Claude Opus 5) as a writing and engineering
+assistant. It contributed to drafting the manuscript text, to the statistical
+analysis code---paired per-prompt ratios, bootstrap confidence intervals---and
+figure generation in \texttt{analyze.py}, and to corrections of the measurement
+harness. The research questions, experimental design, all measurements, and the
+interpretation of results are the author's own. The author takes full
+responsibility for the content.
+
 \section*{Artifact Availability}
 The measurement harness, the complete dataset including every discarded run,
 and the analysis that generates every table and figure in this paper are
-archived at \href{https://doi.org/10.5281/zenodo.23243517}{doi:10.5281/zenodo.23243517}. Five superseded runs are included
+archived under a permanent DOI\ifanon, withheld for double-anonymized review
+because the repository identifies the author and supplied on the title page\else{} at
+\href{https://doi.org/10.5281/zenodo.23243517}{doi:10.5281/zenodo.23243517}\fi.
+Five superseded runs are included
 deliberately, each with a written account of why it was rejected---short
 measurement windows, prompts cycled by repeat index, an unsettled warmup, a
 per-configuration baseline that made the data noisier, and a half-measured
@@ -1008,6 +1038,9 @@ dataset---because the reason a measurement was discarded is part of the method.
 \bibliographystyle{IEEEtran}
 \bibliography{refs}
 
+\ifanon
+% Biography omitted for double-anonymized review.
+\else
 % IEEEbiographynophoto avoids needing a portrait at submission. Switch to
 % \begin{IEEEbiography}[{\includegraphics[...]{photo}}]{...} if a photo is
 % wanted for the camera-ready version.
@@ -1024,5 +1057,6 @@ interests include the energy efficiency of on-device machine learning,
 measurement methodology for heterogeneous processors, and the systems side of
 language model deployment.
 \end{IEEEbiographynophoto}
+\fi
 
 \end{document}
