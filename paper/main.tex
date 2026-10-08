@@ -147,7 +147,10 @@ power varies across islands---distinguishes the cases.
 \subsection{Contributions}
 \begin{itemize}
 \item A RAPL-based measurement harness for LLM inference on heterogeneous CPUs
-  that separates prefill from decode, records KV cache growth per step,
+  that separates prefill from decode---which we use to show that SMT helps the
+  compute-bound phase and hurts the memory-bound one, confirming the premise
+  the rest of the analysis rests on (Section~\ref{sec:prefill})---records KV
+  cache growth per step,
   subtracts a verified idle baseline, and degrades to timing-only measurement
   rather than silently estimating energy when counters are unreadable. It is
   released with a unit test suite covering the logic that would corrupt results
@@ -302,6 +305,13 @@ configurations. Threads are pinned with explicit affinity masks, and the mask
 is restored after each configuration so placements cannot leak into one
 another.
 
+All measurements use \textbf{batch size one}. This is the on-device regime, in
+which requests arrive singly and there is nothing to batch with, and it is the
+regime in which decode is most firmly memory-bound. Batching raises arithmetic
+intensity by amortising each weight read across several sequences, so a batched
+server may not exhibit the power invariance reported here; we return to this in
+Section~\ref{sec:threats}.
+
 \subsection{Paired design}
 \label{sec:stats}
 Each configuration is measured on four fixed prompts, with five true repeats
@@ -320,7 +330,16 @@ difference in Section~\ref{sec:results}.
 We report the geometric mean of per-prompt ratios with a percentile bootstrap
 95\% confidence interval over prompts, and we state the direction of an effect
 only when that interval excludes unity; Fig.~\ref{fig:forest} collects every
-comparison in the study on a single axis. We also report whether the ratio has
+comparison in the study on a single axis.
+
+The resampling unit is the prompt, and there are four of them, so these
+intervals should be read as a statement about agreement across prompts rather
+than as asymptotic coverage. We prefer that to the alternative: with twenty
+measurements per configuration we could resample individual trials and obtain
+far narrower intervals, but those would understate the uncertainty that matters,
+which is whether an effect holds across inputs rather than across repetitions of
+one input. Where the per-prompt ratios disagree in sign we report that fact
+instead of an interval. We also report whether the ratio has
 the same sign in every prompt, which distinguishes a consistent effect from one
 carried by a single input.
 
@@ -436,6 +455,14 @@ and bf16 configuration}, across islands whose throughput spans 7.0 to
 and 14.01\,W. This is not a power cap; the long-term RAPL limit on this part is
 40\,W.
 
+Flatness of this degree invites a measurement objection: some Intel parts derive
+package power from an internal model rather than from direct sensing, and a
+saturating model would produce exactly this appearance. The data refutes that
+here. The int8 configurations, measured by the same counter on the same part in
+the same runs, span 13.96 to 15.92\,W (Section~\ref{sec:int8break}). The
+instrument resolves power differences on this platform; fp32 and bf16 simply do
+not produce any.
+
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/power_vs_throughput.png}
@@ -494,6 +521,7 @@ cores save energy'' fails here not because the saving is small, but because
 there is no power saving available to trade in the first place.
 
 \subsection{The identity fails exactly where the mechanism predicts}
+\label{sec:int8break}
 int8 is the one precision whose power is not flat: it spans 13.96--15.92\,W,
 median 14.81\,W. It is also the one precision for which the identity breaks,
 by up to 27.5\% against a worst case of 1.10\% for fp32 and bf16
@@ -589,6 +617,51 @@ Two consequences. Any claim of bit-exact reproducibility across islands is
 false for quantized models. And a sampling-based decoder has no argmax margin
 to absorb the difference, so the guarantee observed here does not transfer to
 it.
+
+\subsection{Prefill behaves oppositely, and confirms the mechanism}
+\label{sec:prefill}
+The argument of this paper rests on decode being memory-bound while prefill is
+not (Section~\ref{sec:phases}). Because the harness times the two phases
+separately, that premise can be tested rather than assumed, on the same
+hardware in the same runs.
+
+Simultaneous multithreading provides the test. Its effect reverses between the
+phases (Table~\ref{tab:prefill}): enabling SMT makes prefill $1.193\times$
+faster and decode $0.936\times$ slower, with both intervals excluding unity.
+This is precisely the signature the two-regime account predicts. A
+compute-bound phase leaves issue slots idle that a sibling thread can fill, so
+SMT helps; a memory-bound phase is already waiting on DRAM, so the sibling adds
+cache contention and no useful parallelism.
+
+\begin{table}[t]
+\centering
+\caption{Throughput ratios against P-1t, bf16, paired per-prompt. SMT helps the
+compute-bound phase and hurts the memory-bound one; the low-power island is
+relatively worse at prefill, which is the compute-bound phase.}
+\label{tab:prefill}
+\begin{tabular}{lrr}
+\toprule
+Placement & Prefill & Decode \\
+\midrule
+P-smt & \textbf{1.193 [1.102, 1.370]} & \textbf{0.936 [0.926, 0.943]} \\
+E     & 0.933 [0.809, 1.012] & 0.881 [0.860, 0.901] \\
+LP-E  & 0.370 [0.367, 0.374] & 0.435 [0.434, 0.437] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The low-power island shows the same asymmetry from the other direction. It
+reaches $0.435\times$ the performance island's decode throughput but only
+$0.370\times$ its prefill throughput: relatively worse at the phase that
+demands compute. The E-core prefill ratio is the one comparison in this table
+whose interval spans unity, and we draw no conclusion from it.
+
+Prefill nonetheless contributes little to the energy totals reported here,
+accounting for 2.3\% of the measurement window on P-1t and 2.7\% on LP-E at 256
+generated tokens. That is why the rest of this paper reports decode: at
+realistic generation lengths it is almost the entire cost. The phases are
+separated so that this could be established rather than assumed, and so that
+the premise underlying the mechanism could be tested independently.
 
 \subsection{Generalisation: model scale and context length}
 \label{sec:generalisation}
@@ -732,8 +805,22 @@ failed attempt at a per-configuration baseline which made the data substantially
 noisier, and the reason: a baseline sampled immediately after a burst of work
 captures the CPU decaying out of turbo rather than idling.
 
+\emph{Batch size one.} Every measurement is unbatched. Batching amortises each
+weight read across several sequences, raising arithmetic intensity and moving
+decode back toward the compute-bound regime, so the power invariance reported
+here should not be assumed to survive it. The single-request case is the
+on-device regime this paper addresses; batched serving is a different setting
+and an obvious next measurement.
+
 \emph{Package domain includes the iGPU.} CPU and iGPU energy cannot be fully
 separated within a run on an integrated part.
+
+\emph{No external instrument.} We did not validate RAPL against a wall meter or
+a shunt on this part. We rely on published characterisation of RAPL against
+full-system power~\cite{khan2018rapl} rather than on a measurement of our own,
+which is a dependency worth naming. It bears mainly on absolute joules; the
+comparisons in Section~\ref{sec:results} are ratios taken from the same counter
+under identical conditions, where a systematic instrument offset cancels.
 
 \emph{Quality measure.} Perplexity and a single needle probe are thin, and the
 needle probe carries no signal on a base model: SmolLM2-135M fails it at every
