@@ -1,200 +1,306 @@
 # Findings
 
-Interpretation of [`runs/qwen2.5-0.5b/RESULTS.md`](runs/qwen2.5-0.5b/RESULTS.md),
+Interpretation of [`runs/qwen2.5-0.5b-v3/RESULTS.md`](runs/qwen2.5-0.5b-v3/RESULTS.md),
 which is generated. This file is written by hand and is where claims live.
 
-**Setup.** Qwen2.5-0.5B-Instruct, 12 configurations (3 precisions × 4 core
-placements), 5 repeats each, 24 new tokens per generation. Energy from RAPL
-`package-0`, net of a 10.45 W idle baseline measured on a quiet machine before any
-load. Intel Core Ultra 7 155H: 6 P-cores (SMT), 8 E-cores, 2 LP-E cores.
+> **Rewritten 2026-10-08 against the v3 dataset.** The previous version rested
+> on 24-token generations with a single 8-token warmup. Three of its claims did
+> not survive remeasurement at 256 tokens with a settled warmup, and one
+> reversed outright. The superseded run and the reason it was discarded are in
+> [`runs/warmup-ablation/`](runs/warmup-ablation/NOTE.md).
 
-| config | tok/s | J/token | net W | perplexity | needle |
-| --- | --- | --- | --- | --- | --- |
-| **bf16 / P-1t** | 17.7 | **0.2692** | 4.78 | 11.091 | 3/3 |
-| bf16 / P-smt | 14.8 | 0.2990 | 4.41 | 11.091 | 3/3 |
-| bf16 / E | 14.4 | 0.3534 | 5.10 | 11.091 | 3/3 |
-| bf16 / LP-E | 7.4 | 0.6210 | 4.58 | 11.091 | 3/3 |
-| fp32 / P-1t | 9.5 | 0.3755 | 3.55 | 11.178 | 3/3 |
-| fp32 / P-smt | 13.1 | 0.3031 | 3.97 | 11.178 | 3/3 |
-| fp32 / E | 12.6 | 0.2891 | 3.64 | 11.178 | 3/3 |
-| fp32 / LP-E | 7.3 | 0.5817 | 4.26 | 11.178 | 3/3 |
-| int8-dynamic / P-1t | 36.3 | 0.2659 | 9.65 | 113.763 | 0/3 |
-| int8-dynamic / P-smt | 27.9 | 0.2906 | 8.09 | 113.763 | 0/3 |
-| int8-dynamic / E | 22.1 | 0.3404 | 7.52 | 113.763 | 0/3 |
-| int8-dynamic / LP-E | 13.3 | 0.6408 | 8.53 | 118.205 | 0/3 |
+**Setup.** Qwen2.5-0.5B-Instruct, 12 configurations (3 precisions x 4 core
+placements), 4 fixed prompts x 5 true repeats = 20 measurements per
+configuration, 240 rows. 256 new tokens per generation. Energy from RAPL
+`package-0`, net of an 11.23 W idle baseline measured on a quiet machine before
+any load. Each configuration warmed at full measurement length until two
+consecutive warmups agreed within 5% (2-5 rounds were needed; one was never
+enough). Intel Core Ultra 7 155H: 6 P-cores (SMT), 8 E-cores, 2 LP-E cores.
 
-The `net W` column is what makes the rest of this legible, so its structure is
-worth stating up front:
+| config | tok/s | J/token | gross W | net W | perplexity | needle |
+| --- | --- | --- | --- | --- | --- | --- |
+| **bf16 / P-1t** | 16.1 | **0.1758** | 14.00 | 2.77 | 12.427 | 3/3 |
+| bf16 / P-smt | 15.1 | 0.1878 | 14.01 | 2.77 | 12.427 | 3/3 |
+| bf16 / E | 14.4 | 0.1987 | 14.01 | 2.78 | 12.427 | 3/3 |
+| bf16 / LP-E | 7.0 | 0.4053 | 14.00 | 2.77 | 12.427 | 3/3 |
+| fp32 / P-1t | 12.0 | 0.2313 | 14.00 | 2.77 | 12.449 | 3/3 |
+| fp32 / E | 11.8 | 0.2357 | 14.00 | 2.77 | 12.449 | 3/3 |
+| fp32 / P-smt | 11.1 | 0.2515 | 14.00 | 2.77 | 12.449 | 3/3 |
+| fp32 / LP-E | 7.0 | 0.4019 | 14.00 | 2.77 | 12.449 | 3/3 |
+| int8-dynamic / P-1t | 27.7 | 0.1281 | 14.78 | 3.55 | 109.953 | 0/3 |
+| int8-dynamic / P-smt | 22.6 | 0.1470 | 14.59 | 3.36 | 109.522 | 0/3 |
+| int8-dynamic / E | 22.5 | 0.1998 | 15.70 | 4.47 | 110.608 | 0/3 |
+| int8-dynamic / LP-E | 11.2 | 0.3209 | 14.82 | 3.59 | 106.391 | 0/3 |
 
-- **Within a precision, net power barely moves across core islands.** fp32 spans
-  3.55–4.26 W, bf16 spans 4.41–5.10 W, int8 spans 7.52–9.65 W — 15–25% each,
-  against a 5× spread in throughput.
-- **Between precisions, net power scales with work rate.** int8 draws roughly 2×
-  what bf16 does, and does roughly 2× the work per second.
+## 1. Energy per token is duration, and the identity is exact
 
-## 1. The efficiency cores are not energy-efficient here
-
-Ranked by joules per token at fixed quality (bf16, byte-identical output in all
-four placements):
+Paired per-prompt ratios against the performance cores, at fixed quality (bf16,
+byte-identical output in all four placements):
 
 ```
-P-1t    0.2692 J/tok    17.7 tok/s    4.78 W      baseline
-P-smt   0.2990 J/tok    14.8 tok/s    4.41 W      +11%
-E       0.3534 J/tok    14.4 tok/s    5.10 W      +31%
-LP-E    0.6210 J/tok     7.4 tok/s    4.58 W      +131%
+P-1t     0.1758 J/tok   16.1 tok/s    baseline
+P-smt    0.1878 J/tok   15.1 tok/s    1.073x  [1.066, 1.081]
+E        0.1987 J/tok   14.4 tok/s    1.148x  [1.117, 1.189]
+LP-E     0.4053 J/tok    7.0 tok/s    2.306x  [2.301, 2.314]
 ```
 
-The low-power island costs **2.31× the energy per token** of the performance
-cores. The mechanism is now visible rather than inferred: net power on LP-E
-(4.58 W) and P-1t (4.78 W) differ by **4%**, while throughput differs by **2.39×**.
-The energy ratio is, to within measurement error, the inverse throughput ratio.
+The low-power island costs **2.306x** the energy per token of the performance
+cores. That is the headline; the mechanism is the finding.
 
-So the low-power island does not run at low power on this workload — it runs at
-the same power and takes 2.4× as long. **Race-to-idle, measured.** The practical
-advice for local LLM inference on this class of SoC is the opposite of the
-intuitive one: use the performance cores and finish sooner.
+**Gross package power is 14.00 W for every fp32 and bf16 configuration**, across
+islands spanning 7.0 to 16.1 tok/s. Not approximately: the medians are 14.00,
+14.00, 14.01, 14.00, 14.00, 14.00, 14.00, 14.01. This is not a power cap --
+RAPL's long-term limit on this part is 40 W.
 
-Two things follow that are worth separating:
+With power constant, energy per token reduces to duration, and that prediction
+is testable. Each configuration's measured energy ratio against the inverse of
+its measured throughput ratio:
 
-- The **ordering is robust**, being driven by a 2.4× duration difference against a
-  4% power difference. No plausible baseline error inverts that.
-- The framing "efficiency cores save energy" fails not because the saving is small
-  but because there is **no power saving to trade** in the first place.
+| | energy ratio | 1 / throughput | difference |
+| --- | --- | --- | --- |
+| fp32 / P-smt | 1.086 | 1.088 | -0.16% |
+| fp32 / E | 1.021 | 1.017 | +0.42% |
+| fp32 / LP-E | 1.737 | 1.727 | +0.62% |
+| bf16 / P-smt | 1.073 | 1.069 | +0.42% |
+| bf16 / E | 1.148 | 1.136 | +1.10% |
+| bf16 / LP-E | 2.306 | 2.296 | +0.43% |
 
-A throughput-only study would have reached the right ranking here by accident. On
-the smaller SmolLM2-135M it would have reached the wrong one: E-cores beat P-cores
-on tokens per second there, which read as an argument for the efficiency island.
+Agreement within 1.1% everywhere. The low-power island does not run at low power
+on this workload -- it runs at the same power for 2.3x as long. **Race to idle,
+measured.**
 
-## 2. bf16 strictly dominates fp32
+The reason is that decode is memory-bandwidth-bound. A 0.5 B-parameter model in
+fp32 streams roughly 2 GB of weights per generated token, so the package power
+budget goes to the memory subsystem and static draw rather than to core
+execution. Which island issues the loads barely matters.
 
-On P-1t, bf16 against fp32:
+## 2. The identity breaks exactly where the mechanism says it should
 
-- **28% less energy** per token (0.2692 vs 0.3755)
-- **86% more throughput** (17.7 vs 9.5 tok/s)
-- **Marginally better perplexity** (11.091 vs 11.178)
+int8-dynamic is the one precision that does not hold 14.00 W: it spans
+13.96-15.92 W, median 14.81 W. It is also the one precision where the identity
+fails:
 
-Better on every axis measured; no configuration in this study makes fp32 the right
-choice. bf16 does draw more power (4.78 vs 3.55 W) because it is doing more work
-per second, but nowhere near enough to offset the speedup.
+```
+int8 / P-smt    energy 1.142   1/tput 1.220    -6.39%
+int8 / E        energy 1.558   1/tput 1.222   +27.51%
+int8 / LP-E     energy 2.509   1/tput 2.447    +2.54%
+```
 
-The perplexity difference is within noise. The claim is only that bf16 is
-certainly not worse, at half the weight traffic.
+Against a worst case of 1.10% for fp32 and bf16. Quantization moves work off the
+memory system and back into the cores, power stops being flat, and duration
+stops being the whole story. The exception is the best evidence that section 1's
+explanation is the right one rather than a coincidence of this platform.
 
-## 3. int8-dynamic buys nothing and costs everything
+`int8 / E` is the outlier worth naming: it draws 15.70 W, the highest of any
+configuration measured, and lands 27.5% worse than its duration predicts.
 
-This is the result that changed most once net power was in view.
+## 3. bf16 beats fp32 -- but only where the hardware supports it
 
-The quantized kernels are genuinely fast: **2.05× the throughput of bf16** on P-1t
-(36.3 vs 17.7 tok/s). But they draw **2.02× the power** (9.65 vs 4.78 W). The two
-cancel almost exactly, leaving joules per token essentially unchanged — 0.2659
-against 0.2692, a 1.2% difference.
+On P-1t, fp32 costs **1.319x [1.309, 1.330]** the energy of bf16 and runs at
+0.745x the throughput, with perplexity marginally worse (12.449 against 12.427).
+No configuration on the performance cores makes fp32 the right choice.
 
-So reading that 1.2% as "a trivial saving" was wrong in an interesting way. It is
-neither noise nor a saving: **it is what happens when you double the work rate and
-double the power draw.** Quantization here bought latency, not energy.
+The advantage is not uniform across islands:
 
-The quality cost is total:
+| island | fp32/bf16 energy | fp32/bf16 tok/s |
+| --- | --- | --- |
+| P-1t | 1.319 [1.309, 1.330] | 0.745 |
+| P-smt | 1.335 [1.303, 1.367] | 0.732 |
+| E | 1.173 [1.132, 1.205] | 0.833 |
+| **LP-E** | **0.994 [0.989, 1.000]** | **0.991** |
 
-- perplexity **11.091 → 113.763**, a 10× increase
-- needle retrieval **3/3 → 0/3**, gone entirely
+**On the low-power island the bf16 advantage disappears entirely.** fp32 and
+bf16 reach the same 7.0 tok/s and the same ~0.40 J/token there. The likely
+explanation is that the LP-E cores lack the bf16 instruction support the P-cores
+have, so bf16 executes at fp32 rates; confirming it needs instruction-level
+profiling this harness does not do.
 
-This is a point about **granularity, not bit width**. PyTorch dynamic quantization
-uses one scale per tensor. GGUF K-quants and GPTQ use per-block or per-channel
-scales and are widely reported to hold quality at 4 bits — far below 8. The
-conclusion is not "8-bit is too aggressive", it is "per-tensor scaling is the wrong
-scheme", and testing K-quants is the obvious next experiment.
+The practical consequence is that **precision and placement cannot be chosen
+independently.** A scheduler migrating a bf16 workload to the low-power island
+does not merely slow it by the island's ratio -- it also forfeits the entire
+benefit of the precision it was running.
 
-The damage also grows with model size: the same scheme cost +228% perplexity on
-SmolLM2-135M and +926% here.
+## 4. Per-tensor int8 does save energy, and is still the wrong choice
 
-**And it does not shrink the KV cache at all.** Dynamic quantization touches only
-Linear weights, so the cache stays fp32 — the measured curves for `fp32` and
-`int8-dynamic` are byte-identical, reaching 866 KiB after 24 decode steps, while
-bf16 reaches 433 KiB. Exactly half. For long-context work, where the cache rather
-than the weights dominates memory, int8-dynamic therefore offers no relief on the
-axis that matters, and bf16 offers a factor of two. That is a third independent
-reason to prefer bf16 (see `figures/kv_growth.png`).
+This reverses the previous version of this file, and the reversal is
+instructive.
 
-## 4. Being on the Pareto frontier is not the same as being sensible
+int8-dynamic on P-1t costs **0.730x [0.726, 0.733]** the energy per token of
+bf16 -- a real 27% saving, with the interval nowhere near 1.0. The 24-token
+dataset reported 0.929x with an interval spanning unity and concluded that
+quantization "bought latency, not energy." At 256 tokens with a settled warmup
+that is wrong: the saving is there and it is unambiguous.
 
-The frontier contains `bf16/P-1t` and `int8-dynamic/P-1t`, the latter only because
-it is 1.2% cheaper in energy — technically non-dominated, practically absurd, since
-it pays for that with a 10× perplexity increase.
+What has not changed is that the saving is unusable:
 
-Worth stating because it is a limitation of the method rather than a result: a
-frontier tells you what is *not dominated*, not what is *worth choosing*. The
-actionable output is **bf16 on the performance cores, one thread per core**, and
-the frontier has to be read alongside the quality column rather than instead of it.
+- perplexity **12.427 -> 109.953**, a 785% increase
+- needle retrieval **3/3 -> 0/3**, gone entirely
 
-## 5. SMT helps fp32 and hurts bf16
+The honest statement is a cost/quality trade rather than an absence of benefit.
+That is a stronger claim than the one it replaces, and a more useful one: the
+energy is real and you still should not take it.
 
-An inversion I cannot fully explain:
+The point stands about **granularity, not bit width**. PyTorch dynamic
+quantization uses one scale per tensor. GGUF K-quants and GPTQ use per-block or
+per-channel scales and hold quality at 4 bits, far below 8. The conclusion is
+not "8-bit is too aggressive", it is "per-tensor scaling is the wrong scheme",
+and testing K-quants is the obvious next experiment.
 
-- **fp32**: P-smt 13.1 tok/s beats P-1t 9.5 — SMT is 38% *faster*
-- **bf16**: P-1t 17.7 tok/s beats P-smt 14.8 — SMT is 20% *slower*
+**And it does not shrink the KV cache.** Dynamic quantization touches only
+Linear weights, so the cache stays at the unquantized dtype. For long-context
+work, where the cache rather than the weights dominates footprint, per-tensor
+int8 offers nothing on the axis that matters while bf16 offers a factor of two.
 
-A plausible reading is that fp32 leaves enough per-core stall time for a second
-hyperthread to fill, while bf16 already saturates the per-core memory path so the
-SMT sibling only adds cache contention. That is a hypothesis, not a measurement.
-Testing it needs hardware performance counters — cache misses, memory stall
-cycles — which this harness does not read.
+## 5. Placement changes the arithmetic, but not the output
 
-## 6. The idle baseline is the weakest part of the measurement
+Greedy decode produced **byte-identical generated text on all four islands**,
+for every precision and prompt (`output_sha` identical throughout). Placement
+affects cost, not tokens.
 
-Net energy is gross minus `idle_watts × duration`, and the baseline is the least
-trustworthy term in that expression.
+The arithmetic underneath is not identical. int8 perplexity varies by placement
+across a 4% range -- 106.391 on LP-E against 110.608 on E -- while fp32 and bf16
+perplexity is constant to three decimals. Different islands dispatch int8
+kernels differently, the numerics differ measurably, and greedy argmax happens
+to be robust to the difference.
 
-**What was tried and failed.** The obvious improvement is to measure the baseline
-per configuration rather than once per run. Implemented naively — immediately after
-model load and warmup — it made the data substantially worse. Gross power across
-four bf16 placements varied 10%; the per-config baselines varied **2.2×**
-(5.96–13.18 W), so net energy varied **11×**, almost all of it artifact. The record
-is in [`runs/failed-perconfig-baseline/`](runs/failed-perconfig-baseline/NOTE.md).
+Two consequences. Any claim of bit-exact reproducibility across islands is false
+for quantized models. And a sampling-based decoder has no argmax margin to
+absorb the difference.
 
-The cause: a baseline sampled right after a burst of work captures the CPU decaying
-out of turbo, not idle, and how far it has decayed depends on timing nobody
-controlled.
+## 6. The Pareto frontier is necessary, not sufficient
 
-**What is implemented now.** `runner.py --baseline {run,per-config}`, defaulting to
-`run`. The `per-config` path waits a settle period, then requires two consecutive
-measurement windows to agree within 10% before accepting either, and records
-`baseline_stable` per row so an unconverged baseline is visible rather than
-silently folded into a result. The numbers in this document use `run`.
+The frontier contains `bf16/P-1t`, `int8-dynamic/P-1t` and
+`int8-dynamic/P-smt`. Two of the three score 0/3 on needle retrieval and carry a
+785% perplexity penalty. They are non-dominated because they are genuinely
+cheaper, and genuinely unusable.
 
-**What this means for the results above.** Absolute joules-per-token figures carry
-a systematic baseline error that is not fully quantified. Every *relative* claim in
-sections 1–3 is safe, because each rests on a ratio far larger than any plausible
-baseline error: 2.31× for the island ordering, 1.86× for bf16 against fp32, 10× for
-the quality collapse. The one comparison that is *not* safe on its own is the 1.2%
-int8-versus-bf16 energy gap — which is why section 3 leans on the power and
-throughput measurements rather than on that difference.
+This is a limitation of the method rather than a result: a frontier tells you
+what is not dominated, not what is worth choosing. The actionable output is
+**bf16 on the performance cores, one thread per core**, and the frontier must be
+read alongside the quality column rather than instead of it.
 
-Net energy is recorded **unclamped**. A negative value means the baseline exceeded
-the measurement, and flooring it at zero would hide exactly the error worth seeing.
-In the clean run `package-0` never went negative; the `uncore` domain did, which is
-expected — its baseline is around 0.2 W and dominated by noise.
+## 7. SMT costs throughput on every precision
+
+```
+fp32   P-1t 12.0 -> P-smt 11.1    -7.5%
+bf16   P-1t 16.1 -> P-smt 15.1    -6.2%
+int8   P-1t 27.7 -> P-smt 22.6   -18.4%
+```
+
+The previous version reported an inversion -- SMT helping fp32 by 38% while
+hurting bf16 by 20% -- and called it unexplained. There is no inversion. SMT
+costs throughput on all three precisions, which is what a memory-bound workload
+predicts: the sibling thread adds cache contention and contributes no useful
+parallelism, because the bottleneck is off-core. The penalty is largest for
+int8, the precision that does the most arithmetic per byte and so contends
+hardest.
+
+## What changed from the 24-token dataset, and why
+
+| claim | 24-token result | 256-token result | verdict |
+| --- | --- | --- | --- |
+| LP-E costs more energy | 2.31x | 2.306x [2.301, 2.314] | holds, now with a 0.6%-wide interval |
+| bf16 beats fp32 | +86% throughput | +34% throughput | holds, magnitude was inflated |
+| fp32/E cheapest fp32 config | yes | no -- P-1t is | artifact |
+| SMT helps fp32, hurts bf16 | yes | no -- hurts both | artifact |
+| int8 energy unchanged | 0.929x, unresolvable | 0.730x [0.726, 0.733] | **reversed** |
+| placement changes perplexity | noted, unexplained | real, int8 only, output unaffected | refined |
+
+The single cause of every artifact was measurement length. At 24 tokens the
+window is about 2.8 s, the idle baseline exceeds the net signal, and throughput
+is still on the frequency and cache ramp. At 256 tokens the window is 15-40 s
+and the measurement is of steady-state decode.
+
+## 8. The island penalty grows as models shrink
+
+The obvious objection to a sub-1B study is that it describes toy models. The
+objection runs the wrong way: the penalty for choosing the wrong island is
+*larger* on the smaller model, and small models are what on-device deployment
+actually runs.
+
+Repeating the full matrix on SmolLM2-135M (240 rows, same protocol):
+
+| model | bf16 LP-E vs P-1t | identity error |
+| --- | --- | --- |
+| Qwen2.5-0.5B | 2.306x [2.301, 2.314] | +0.43% |
+| SmolLM2-135M | **3.712x [3.159, 4.342]** | +0.68% |
+
+The penalty is 61% larger on the 135M model, and the duration identity from
+section 1 holds on both. The mechanism is visible in the throughput: the
+performance cores exploit the smaller model (16.1 -> 34.7 tok/s, a 2.2x gain)
+while the low-power island barely moves (7.0 -> 8.3, only 1.2x). Less weight
+traffic means the workload is relatively less memory-bound, so core capability
+starts to matter -- and that is exactly what the low-power island does not have.
+
+Package power stayed flat on this model too: fp32 median 14.00 W, bf16 14.00 W,
+int8 14.26 W. Third independent confirmation, on a different model, with a
+different idle baseline (9.66 W).
+
+**The same mechanism erases the quantization benefit.** int8 against bf16 on
+SmolLM2 costs **1.053x [1.007, 1.101]** the energy -- marginally *more*
+expensive, with the interval excluding 1.0 on the wrong side, against 0.730x on
+Qwen. Quantization saves energy only to the extent the model is memory-bound.
+At 0.5 B it saves 27%; at 135 M it costs 5%, and perplexity still rises from
+13.4 to 40.8.
+
+> **The needle probe carries no signal at this model size.** SmolLM2-135M is a
+> base model rather than instruction-tuned, and scores 0/3 at bf16 and 1/3 at
+> int8. That is the probe failing, not int8 outperforming bf16, and the column
+> should not be read as a quality comparison for this model.
+
+## 9. The result survives a 4x longer context
+
+Generating 1024 tokens instead of 256 quadruples the KV cache and slows both
+islands, but barely moves the ratio:
+
+| | P-1t | LP-E | KV cache | LP-E vs P-1t energy |
+| --- | --- | --- | --- | --- |
+| 256 tokens | 16.1 tok/s @ 14.00 W | 7.0 @ 14.00 W | 3,204 KiB | 2.306x [2.301, 2.314] |
+| 1024 tokens | 14.0 tok/s @ 14.00 W | 6.2 @ 14.00 W | 12,384 KiB | 2.251x (see caveat) |
+
+Both islands lose about 12% throughput as attention over a longer context grows
+more expensive, and package power is still exactly 14.00 W on both at four
+times the context length.
+
+> **Caveat: this comparison has no confidence interval.** The long-context run
+> used 2 prompts rather than 4, which leaves only two paired ratios -- below the
+> three that `bootstrap_ci` requires before it will report an interval. The
+> guard behaved correctly; the experiment design did not. The point estimate is
+> sound and the conclusion is stable, but a robustness check without an interval
+> invites exactly the question it exists to answer, and this should be re-run at
+> 4 prompts before the result is relied on.
 
 ## Confounds controlled
 
-Idle baseline subtracted; one warmup generation per configuration discarded for
-thermal soak; 5 repeats with IQR reported; identical prompts and seed throughout;
-affinity restored between configurations; energy availability fixed once per run so
-a permission change mid-run cannot produce a half-measured dataset.
+Idle baseline measured once on a quiet machine, subtracted, reported, and
+recorded per row; warmup at full measurement length until throughput settles
+within 5%, with `warmup_settled` recorded so an unconverged configuration is
+visible; 20 measurements per configuration as a 4x5 prompt-by-repeat cross;
+paired per-prompt ratios with bootstrap 95% intervals, and no directional claim
+where an interval spans 1.0; identical prompts, seed and corpus throughout;
+affinity restored between configurations; energy availability fixed once per
+run; net energy recorded unclamped.
 
 ## Not covered
 
-- **One machine, one SoC.** Nothing here generalises beyond Meteor Lake.
-- **iGPU and NPU unmeasured.** Both are present and idle. Section 1 makes them more
-  interesting, not less: if energy per token is set by duration at roughly constant
-  power, an engine that is both faster *and* genuinely lower-power should win by
-  more than either factor alone. Nothing in this data predicts by how much.
-- **Small models only.** 0.5B and 135M. Whether the island ordering survives at 7B,
-  where memory pressure is far higher and power may stop being flat across
-  placements, is untested — and is the most likely place these conclusions break.
-- **Perplexity and one needle probe** are a thin quality measure. They caught the
-  int8 collapse decisively; a real evaluation suite would be better.
-- **24 tokens per generation** is short. The KV cache measurement supports the
-  point in section 3 about int8 not shrinking the cache, but long-context
-  behaviour — where the cache overtakes the weights in memory footprint and the
-  energy picture may change — is not explored.
-- **No hardware performance counters**, so section 5 stays a hypothesis.
+- **One machine, one SoC.** Nothing here generalises beyond Meteor Lake. The
+  result is explicitly a property of a platform whose package power is flat
+  across islands for this workload; a platform where it is not would behave
+  differently, and one has been reported on ARM mobile.
+- **Small models only.** 0.5 B and 135 M. Section 8 shows the ordering holds
+  across that range and that the penalty grows as the model shrinks, but 7 B --
+  where memory pressure is far higher and power may cease to be flat -- is
+  untested and remains the most likely place these conclusions break.
+- **iGPU and NPU unmeasured.** Both present and idle. Section 1 makes them more
+  interesting, not less: if energy is set by duration at fixed power, an engine
+  that is both faster and genuinely lower-power should win by more than either
+  factor alone.
+- **The bf16/LP-E explanation is a hypothesis.** Instruction-level profiling
+  would confirm or refute the missing-bf16-support account in section 3.
+- **Perplexity and one needle probe** are a thin quality measure. They caught
+  the int8 collapse decisively; a real evaluation suite would be better.
+- **No hardware performance counters**, so the SMT and LP-E mechanisms in
+  sections 7 and 3 remain inference from throughput rather than direct evidence.
+- **The machine was not perfectly quiet.** Some trials show excursions
+  consistent with background load during the run. That widens intervals rather
+  than biasing them, so the reported effects are if anything understated.

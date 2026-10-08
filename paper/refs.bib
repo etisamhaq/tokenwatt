@@ -1,0 +1,274 @@
+% ---------------------------------------------------------------------------
+% Every entry below was verified against the publisher or arXiv record.
+% Do not add an entry that has not been checked -- a fabricated citation is the
+% fastest way to lose a reviewer's trust, and they do check.
+% ---------------------------------------------------------------------------
+
+% --- RAPL: validity and security ------------------------------------------
+@article{khan2018rapl,
+  author  = {Khan, Kashif Nizam and Hirki, Mikael and Niemi, Tapio and
+             Nurminen, Jukka K. and Ou, Zhonghong},
+  title   = {{RAPL} in Action: Experiences in Using {RAPL} for Power Measurements},
+  journal = {ACM Transactions on Modeling and Performance Evaluation of
+             Computing Systems (TOMPECS)},
+  volume  = {3},
+  number  = {2},
+  pages   = {1--26},
+  year    = {2018},
+  doi     = {10.1145/3177754}
+}
+
+@inproceedings{lipp2021platypus,
+  author    = {Lipp, Moritz and Kogler, Andreas and Oswald, David and
+               Schwarz, Michael and Easdon, Catherine and Canella, Claudio and
+               Gruss, Daniel},
+  title     = {{PLATYPUS}: Software-based Power Side-Channel Attacks on x86},
+  booktitle = {2021 IEEE Symposium on Security and Privacy (SP)},
+  pages     = {355--371},
+  year      = {2021},
+  publisher = {IEEE},
+  doi       = {10.1109/SP40001.2021.00063}
+}
+
+@inproceedings{zhang2021redalert,
+  author    = {Zhang, Zhenkai and Liang, Sisheng and Yao, Fan and Gao, Xing},
+  title     = {Red Alert for Power Leakage: Exploiting {Intel} {RAPL}-Induced
+               Side Channels},
+  booktitle = {Proceedings of the 2021 ACM Asia Conference on Computer and
+               Communications Security (ASIA CCS)},
+  pages     = {162--175},
+  year      = {2021},
+  doi       = {10.1145/3433210.3437517}
+}
+
+% --- LLM inference energy --------------------------------------------------
+@inproceedings{samsi2023words,
+  author    = {Samsi, Siddharth and Zhao, Dan and McDonald, Joseph and
+               Li, Baolin and Michaleas, Adam and Jones, Michael and
+               Bergeron, William and Kepner, Jeremy and Tiwari, Devesh and
+               Gadepally, Vijay},
+  title     = {From Words to Watts: Benchmarking the Energy Costs of Large
+               Language Model Inference},
+  booktitle = {2023 IEEE High Performance Extreme Computing Conference (HPEC)},
+  year      = {2023},
+  publisher = {IEEE},
+  eprint    = {2310.03003},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{luccioni2024power,
+  author    = {Luccioni, Alexandra Sasha and Jernite, Yacine and
+               Strubell, Emma},
+  title     = {Power Hungry Processing: Watts Driving the Cost of {AI}
+               Deployment?},
+  booktitle = {Proceedings of the 2024 ACM Conference on Fairness,
+               Accountability, and Transparency (FAccT)},
+  pages     = {85--99},
+  year      = {2024},
+  doi       = {10.1145/3630106.3658542}
+}
+
+% --- Quantization ----------------------------------------------------------
+@inproceedings{dettmers2022llmint8,
+  author    = {Dettmers, Tim and Lewis, Mike and Belkada, Younes and
+               Zettlemoyer, Luke},
+  title     = {{LLM.int8()}: 8-bit Matrix Multiplication for Transformers at
+               Scale},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {35},
+  year      = {2022},
+  eprint    = {2208.07339},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{frantar2023gptq,
+  author    = {Frantar, Elias and Ashkboos, Saleh and Hoefler, Torsten and
+               Alistarh, Dan},
+  title     = {{GPTQ}: Accurate Post-Training Quantization for Generative
+               Pre-trained Transformers},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2023},
+  eprint    = {2210.17323},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{lin2024awq,
+  author    = {Lin, Ji and Tang, Jiaming and Tang, Haotian and Yang, Shang and
+               Chen, Wei-Ming and Wang, Wei-Chen and Xiao, Guangxuan and
+               Dang, Xingyu and Gan, Chuang and Han, Song},
+  title     = {{AWQ}: Activation-aware Weight Quantization for On-Device
+               {LLM} Compression and Acceleration},
+  booktitle = {Proceedings of Machine Learning and Systems (MLSys)},
+  volume    = {6},
+  year      = {2024}
+}
+
+% --- Serving systems -------------------------------------------------------
+@inproceedings{kwon2023pagedattention,
+  author    = {Kwon, Woosuk and Li, Zhuohan and Zhuang, Siyuan and
+               Sheng, Ying and Zheng, Lianmin and Yu, Cody Hao and
+               Gonzalez, Joseph E. and Zhang, Hao and Stoica, Ion},
+  title     = {Efficient Memory Management for Large Language Model Serving
+               with {PagedAttention}},
+  booktitle = {Proceedings of the 29th Symposium on Operating Systems
+               Principles (SOSP)},
+  pages     = {611--626},
+  year      = {2023},
+  doi       = {10.1145/3600006.3613165}
+}
+
+
+% --- On-device / mobile LLM inference energy -------------------------------
+% NOTE: mnn2025aecs reaches the OPPOSITE conclusion to this paper on ARM
+% mobile parts. It must be engaged with directly in Related Work, not merely
+% cited. See the discussion of platform differences in Section "Related Work".
+@article{mnn2025aecs,
+  author  = {Huang, Zhengxiang and Niu, Chaoyue and Wang, Zhaode and
+             Xue, Jiarui and Zhang, Hanming and Wang, Yugang and Xin, Zewei and
+             Jiang, Xiaotang and Lv, Chengfei and Wu, Fan and Chen, Guihai},
+  title   = {{MNN-AECS}: Energy Optimization for {LLM} Decoding on Mobile
+             Devices via Adaptive Core Selection},
+  journal = {arXiv preprint},
+  eprint  = {2506.19884},
+  archivePrefix = {arXiv},
+  year    = {2025}
+}
+
+@article{mobiledvfs2025,
+  author  = {Zhang, Zongpu and Dash, Pranab and Hu, Y. Charlie and Xu, Qiang and
+             Li, Jian and Guan, Haibing},
+  title   = {Dissecting the Impact of Mobile {DVFS} Governors on {LLM}
+             Inference Performance and Energy Efficiency},
+  journal = {arXiv preprint},
+  eprint  = {2507.02135},
+  archivePrefix = {arXiv},
+  year    = {2025}
+}
+
+@article{cpuoutperform2025,
+  author  = {Zhang, Haolin and Huang, Jeff},
+  title   = {Challenging {GPU} Dominance: When {CPUs} Outperform for On-Device
+             {LLM} Inference},
+  journal = {arXiv preprint},
+  eprint  = {2505.06461},
+  archivePrefix = {arXiv},
+  year    = {2025}
+}
+
+@article{hydra2026,
+  author  = {Taherin, Amir and Anvari, Sana Taghipour and Amante, Charles and
+             Chen, Yixiao and Noroian, Ruben and Feric, Zlatan and
+             Agostini, Nicolas Bohm and Zhao, Pu and Cano, Jos\'{e} and
+             Ren, Bin and Wang, Yanzhi and Kaeli, David},
+  title   = {Hydra: Phase-Aware Workload Characterization of {LLM} Inference
+             across Edge {SoC} Generations, Backends, and Quantization Levels},
+  journal = {arXiv preprint},
+  eprint  = {2608.25053},
+  archivePrefix = {arXiv},
+  year    = {2026}
+}
+
+% --- Memory-bound decode ---------------------------------------------------
+@article{yuan2024roofline,
+  author  = {Yuan, Zhihang and Shang, Yuzhang and Zhou, Yang and Dong, Zhen and
+             Zhou, Zhe and Xue, Chenhao and Wu, Bingzhe and Li, Zhikai and
+             Gu, Qingyi and Lee, Yong Jae and Yan, Yan and Chen, Beidi and
+             Sun, Guangyu and Keutzer, Kurt},
+  title   = {{LLM} Inference Unveiled: Survey and Roofline Model Insights},
+  journal = {arXiv preprint},
+  eprint  = {2402.16363},
+  archivePrefix = {arXiv},
+  year    = {2024}
+}
+
+% --- Race to idle ----------------------------------------------------------
+@inproceedings{lesueur2011slowdown,
+  author    = {Le Sueur, Etienne and Heiser, Gernot},
+  title     = {Slow Down or Sleep, that is the Question},
+  booktitle = {USENIX Annual Technical Conference (ATC)},
+  year      = {2011}
+}
+
+@article{albers2014race,
+  author  = {Albers, Susanne and Antoniadis, Antonios},
+  title   = {Race to Idle: New Algorithms for Speed Scaling with a Sleep State},
+  journal = {ACM Transactions on Algorithms},
+  volume  = {10},
+  number  = {2},
+  pages   = {1--31},
+  year    = {2014},
+  doi     = {10.1145/2556953}
+}
+
+
+% --- Race to idle / race to halt -------------------------------------------
+@article{awan2014racetohalt,
+  author  = {Awan, Muhammad Ali and Petters, Stefan M.},
+  title   = {Race-to-halt Energy Saving Strategies},
+  journal = {Journal of Systems Architecture},
+  volume  = {60},
+  number  = {10},
+  pages   = {796--815},
+  year    = {2014},
+  doi     = {10.1016/j.sysarc.2014.10.001}
+}
+
+@inproceedings{kim2015racing,
+  author    = {Kim, David H. K. and Imes, Connor and Hoffmann, Henry},
+  title     = {Racing and Pacing to Idle: Theoretical and Empirical Analysis of
+               Energy Optimization Heuristics},
+  booktitle = {IEEE 3rd International Conference on Cyber-Physical Systems,
+               Networks, and Applications (CPSNA)},
+  pages     = {78--85},
+  year      = {2015}
+}
+
+% --- Heterogeneous / asymmetric multicore energy ---------------------------
+@inproceedings{catalan2015bigLITTLE,
+  author    = {Catal\'{a}n, Sandra and Igual, Francisco D. and Mayo, Rafael and
+               Pi\~{n}uel, Luis and Quintana-Ort\'{i}, Enrique S. and
+               Rodr\'{i}guez-S\'{a}nchez, Rafael},
+  title     = {Performance and Energy Optimization of Matrix Multiplication on
+               Asymmetric {big.LITTLE} Processors},
+  booktitle = {HiPEAC},
+  year      = {2015},
+  eprint    = {1507.05129},
+  archivePrefix = {arXiv}
+}
+
+@article{butko2019exploration,
+  author  = {Butko, Anastasiia and Bruguier, Florent and Novo, David and
+             Gamati\'{e}, Abdoulaye and Sassatelli, Gilles},
+  title   = {Exploration of Performance and Energy Trade-offs for Heterogeneous
+             Multicore Architectures},
+  journal = {arXiv preprint},
+  eprint  = {1902.02343},
+  archivePrefix = {arXiv},
+  year    = {2019}
+}
+
+@article{coutinho2020tradeoffs,
+  author  = {Coutinho, Demetrios A. M. and De Sensi, Daniele and
+             Lorenzon, Arthur Francisco and Georgiou, Kyriakos and
+             Nunez-Yanez, Jose and Eder, Kerstin and
+             Xavier-de-Souza, Samuel},
+  title   = {Performance and Energy Trade-Offs for Parallel Applications on
+             Heterogeneous Multi-Processing Systems},
+  journal = {Energies},
+  volume  = {13},
+  number  = {9},
+  pages   = {2409},
+  year    = {2020},
+  doi     = {10.3390/en13092409}
+}
+
+% ---------------------------------------------------------------------------
+% TODO before submission: expand to ~40 refs. Gaps, in priority order:
+%   * heterogeneous / big.LITTLE scheduling energy studies
+%   * Awan & Petters race-to-halt; Kim et al. CPSNA 2015 racing/pacing to idle
+%   * more on-device LLM systems (llama.cpp, MLC-LLM, OpenVINO, NPU offload)
+%   * GGUF K-quant evaluation, if a citable write-up exists
+%   * energy measurement methodology beyond RAPL (wall meters, model-based)
+%   * perplexity and needle-in-haystack as quality proxies
+% Each must be verified against the publisher record before being added.
+% ---------------------------------------------------------------------------

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import random
 import statistics
 from collections import defaultdict
 from pathlib import Path
@@ -74,6 +76,97 @@ def iqr(values: list[float]) -> float:
     return q[2] - q[0]
 
 
+def bootstrap_ci(values: list[float], statistic=statistics.median,
+                 confidence: float = 0.95, resamples: int = 10_000,
+                 seed: int = 0) -> tuple[float, float] | None:
+    """Percentile bootstrap interval for `statistic`.
+
+    IQR describes the spread of the sample; it says nothing about how precisely
+    the sample locates the median. Those are different questions and the claims
+    in FINDINGS.md are about the second. Returns None below 3 values, where a
+    resampled interval would be arithmetic rather than evidence."""
+    if len(values) < 3:
+        return None
+    rng = random.Random(seed)
+    n = len(values)
+    stats = []
+    for _ in range(resamples):
+        stats.append(statistic([values[rng.randrange(n)] for _ in range(n)]))
+    stats.sort()
+    lo_i = int((1.0 - confidence) / 2.0 * resamples)
+    hi_i = min(resamples - 1, int((1.0 + confidence) / 2.0 * resamples))
+    return stats[lo_i], stats[hi_i]
+
+
+def by_prompt(rows: list[dict], key) -> dict[int, float]:
+    """Median of `key` per prompt_index, collapsing true repeats.
+
+    This is the unit of the paired analysis: repeats are exchangeable
+    measurements of one thing, prompts are not."""
+    buckets: dict[int, list[float]] = defaultdict(list)
+    for r in rows:
+        v = key(r)
+        if v is not None:
+            buckets[r.get("prompt_index", 0)].append(v)
+    return {p: statistics.median(v) for p, v in buckets.items() if v}
+
+
+def paired_ratio(rows_a: list[dict], rows_b: list[dict], key,
+                 confidence: float = 0.95) -> dict | None:
+    """Ratio a/b computed within each prompt, then aggregated across prompts.
+
+    Every configuration sees the same prompts, so differencing inside a prompt
+    removes prompt-to-prompt variation -- which on this workload is comparable to
+    the effects being measured, so the unpaired comparison buries a real effect
+    in the prompt spread. Reports the geometric mean of the per-prompt ratios
+    with a bootstrap interval, and the raw ratios, so a reader can see whether an
+    effect is consistent or carried by a single prompt."""
+    a, b = by_prompt(rows_a, key), by_prompt(rows_b, key)
+    shared = sorted(set(a) & set(b))
+    ratios = [a[p] / b[p] for p in shared if b[p]]
+    if not ratios:
+        return None
+    gmean = math.exp(statistics.fmean(math.log(r) for r in ratios))
+    ci = bootstrap_ci([math.log(r) for r in ratios], statistic=statistics.fmean,
+                      confidence=confidence)
+    return {
+        "n_prompts": len(ratios),
+        "ratio": gmean,
+        "ci": (math.exp(ci[0]), math.exp(ci[1])) if ci else None,
+        "per_prompt": {p: a[p] / b[p] for p in shared if b[p]},
+        "consistent": all(r > 1 for r in ratios) or all(r < 1 for r in ratios),
+    }
+
+
+def determinism_report(rows: list[dict]) -> list[dict]:
+    """Where identical (precision, prompt) gave different output by placement.
+
+    Greedy decode at a fixed seed should be placement-invariant. On this SoC it
+    is not always: islands can dispatch to different kernels, the arithmetic
+    differs, and the generated text diverges. Downstream that appears only as an
+    unexplained perplexity difference, which reads as noise. Comparing digests
+    names it instead."""
+    groups: dict[tuple, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    for r in rows:
+        sha = r.get("output_sha")
+        if sha:
+            groups[(r["precision"], r.get("prompt_index", 0))][r["placement"]].add(sha)
+
+    out = []
+    for (prec, prompt), per_place in sorted(groups.items()):
+        all_shas = set().union(*per_place.values())
+        if len(all_shas) > 1:
+            out.append({
+                "precision": prec,
+                "prompt_index": prompt,
+                "placements": {p: sorted(s) for p, s in sorted(per_place.items())},
+                "n_distinct": len(all_shas),
+                "unstable_within_placement": sorted(
+                    p for p, s in per_place.items() if len(s) > 1),
+            })
+    return out
+
+
 def summarise(rows: list[dict]) -> list[dict]:
     """One record per configuration, with median and IQR over repeats."""
     groups: dict[str, list[dict]] = defaultdict(list)
@@ -90,6 +183,14 @@ def summarise(rows: list[dict]) -> list[dict]:
                     if r.get("joules_per_new_token")
                     and ENERGY_DOMAIN in r["joules_per_new_token"]]
 
+        # Net power is the quantity that makes the island result interpretable:
+        # if it is flat across placements then energy differences are duration
+        # differences, which is a mechanism rather than an observation.
+        watt_vals = [r["joules_net"][ENERGY_DOMAIN] / r["window_s"]
+                     for r in rs
+                     if r.get("joules_net") and r.get("window_s")
+                     and ENERGY_DOMAIN in r["joules_net"]]
+
         first = rs[0]
         out.append({
             "config": cfg,
@@ -104,6 +205,11 @@ def summarise(rows: list[dict]) -> list[dict]:
             "s_per_token_med": 1.0 / statistics.median(tok_s) if statistics.median(tok_s) else None,
             "joules_per_token_med": statistics.median(jpt_vals) if jpt_vals else None,
             "joules_per_token_iqr": iqr(jpt_vals) if jpt_vals else None,
+            "joules_per_token_ci": bootstrap_ci(jpt_vals) if jpt_vals else None,
+            "decode_tok_per_s_ci": bootstrap_ci(tok_s),
+            "net_watts_med": statistics.median(watt_vals) if watt_vals else None,
+            "net_watts_ci": bootstrap_ci(watt_vals) if watt_vals else None,
+            "n_prompts": len({r.get("prompt_index", 0) for r in rs}),
             "energy_measured": bool(jpt_vals),
             "param_bytes": first["param_bytes"],
             "peak_rss_bytes": max(r["peak_rss_bytes"] for r in rs),
@@ -185,24 +291,190 @@ def pareto(points: list[tuple[str, float, float]]) -> list[str]:
 
 def fmt_table(summary: list[dict], loss: dict[str, float],
               frontier: set[str], energy: bool) -> str:
-    cost_hdr = "J/token" if energy else "s/token"
+    cost_hdr = "J/token [95% CI]" if energy else "s/token"
     lines = [
-        f"| config | tok/s (IQR) | {cost_hdr} | perplexity | Δquality | needle | on frontier |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        f"| config | n | tok/s [95% CI] | {cost_hdr} | perplexity | Δquality | needle | on frontier |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for s in summary:
         cost = (s["joules_per_token_med"] if energy else s["s_per_token_med"])
-        cost_s = f"{cost:.4f}" if cost is not None else "-"
+        if cost is None:
+            cost_s = "-"
+        elif energy and s.get("joules_per_token_ci"):
+            lo, hi = s["joules_per_token_ci"]
+            cost_s = f"{cost:.4f} [{lo:.4f}, {hi:.4f}]"
+        else:
+            cost_s = f"{cost:.4f}"
+        tps = f"{s['decode_tok_per_s_med']:.1f}"
+        if s.get("decode_tok_per_s_ci"):
+            lo, hi = s["decode_tok_per_s_ci"]
+            tps += f" [{lo:.1f}, {hi:.1f}]"
         ppl = f"{s['perplexity']:.3f}" if s.get("perplexity") is not None else "-"
         dq = f"{loss[s['config']] * 100:+.1f}%" if s["config"] in loss else "-"
         nd = (f"{s['needle_pass']}/{s['needle_total']}"
               if s.get("needle_total") else "-")
         lines.append(
-            f"| `{s['config']}` | {s['decode_tok_per_s_med']:.1f} "
-            f"(±{s['decode_tok_per_s_iqr']:.1f}) | {cost_s} | {ppl} | {dq} | {nd} "
+            f"| `{s['config']}` | {s['n']} | {tps} | {cost_s} | {ppl} | {dq} | {nd} "
             f"| {'yes' if s['config'] in frontier else ''} |"
         )
     return "\n".join(lines)
+
+
+def _fmt_ratio(res: dict) -> str:
+    ci = (f" [{res['ci'][0]:.3f}, {res['ci'][1]:.3f}]" if res["ci"] else "")
+    flag = "" if res["consistent"] else " ⚠ sign varies by prompt"
+    return f"{res['ratio']:.3f}x{ci}{flag}"
+
+
+def paired_section(rows: list[dict], energy: bool) -> str:
+    """Paired per-prompt comparisons for the two claims the paper rests on."""
+    cost_key = ((lambda r: (r.get("joules_per_new_token") or {}).get(ENERGY_DOMAIN))
+                if energy else
+                (lambda r: 1.0 / r["decode_tok_per_s"] if r["decode_tok_per_s"] else None))
+    cost_name = "J/token" if energy else "s/token"
+    tps_key = lambda r: r["decode_tok_per_s"]
+
+    by_cfg: dict[tuple, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_cfg[(r["precision"], r["placement"])].append(r)
+    if not by_cfg:
+        return ""
+
+    n_prompts = len({r.get("prompt_index", 0) for r in rows})
+    out = [
+        "## Paired comparisons",
+        "",
+        f"Ratios computed within each of the {n_prompts} prompts and then "
+        "aggregated (geometric mean, bootstrap 95% CI over prompts). Pairing "
+        "removes prompt-to-prompt variation, which is otherwise large enough to "
+        "swamp these effects. A ratio below 1.000 favours the first config; an "
+        "interval spanning 1.000 means the data does not resolve the direction.",
+        "",
+    ]
+
+    precisions = sorted({p for p, _ in by_cfg})
+    placements = sorted({pl for _, pl in by_cfg})
+    ref_prec = "bf16" if "bf16" in precisions else precisions[0]
+    ref_place = "P-1t" if "P-1t" in placements else placements[0]
+
+    # --- island effect, precision held fixed ---
+    others = [pl for pl in placements if pl != ref_place
+              and (ref_prec, pl) in by_cfg]
+    if (ref_prec, ref_place) in by_cfg and others:
+        out += [f"### Core placement (precision fixed at `{ref_prec}`)", "",
+                f"| comparison | {cost_name} ratio | tok/s ratio |",
+                "| --- | --- | --- |"]
+        base = by_cfg[(ref_prec, ref_place)]
+        for pl in others:
+            c = paired_ratio(by_cfg[(ref_prec, pl)], base, cost_key)
+            t = paired_ratio(by_cfg[(ref_prec, pl)], base, tps_key)
+            out.append(f"| `{pl}` vs `{ref_place}` | "
+                       f"{_fmt_ratio(c) if c else '-'} | "
+                       f"{_fmt_ratio(t) if t else '-'} |")
+        out.append("")
+
+    # --- precision effect, placement held fixed ---
+    others = [p for p in precisions if p != ref_prec and (p, ref_place) in by_cfg]
+    if (ref_prec, ref_place) in by_cfg and others:
+        out += [f"### Precision (placement fixed at `{ref_place}`)", "",
+                f"| comparison | {cost_name} ratio | tok/s ratio |",
+                "| --- | --- | --- |"]
+        base = by_cfg[(ref_prec, ref_place)]
+        for p in others:
+            c = paired_ratio(by_cfg[(p, ref_place)], base, cost_key)
+            t = paired_ratio(by_cfg[(p, ref_place)], base, tps_key)
+            out.append(f"| `{p}` vs `{ref_prec}` | "
+                       f"{_fmt_ratio(c) if c else '-'} | "
+                       f"{_fmt_ratio(t) if t else '-'} |")
+        out.append("")
+    return "\n".join(out)
+
+
+def determinism_section(rows: list[dict]) -> str:
+    div = determinism_report(rows)
+    if not any(r.get("output_sha") for r in rows):
+        return ""
+    out = ["## Output determinism across placements", ""]
+    if not div:
+        out += ["Greedy decode produced byte-identical output on every core "
+                "island, for every precision and prompt. Placement affected "
+                "cost only, not the tokens generated.", ""]
+        return "\n".join(out)
+    out += [
+        "> **Placement changed the generated text.** Greedy decode at a fixed "
+        "seed should not depend on which cores run it. Where it does, the "
+        "islands are dispatching to different kernels and the arithmetic "
+        "differs — which also makes any perplexity difference between these "
+        "rows a real numerical effect rather than measurement noise.",
+        "",
+        "| precision | prompt | distinct outputs | by placement |",
+        "| --- | --- | --- | --- |",
+    ]
+    for d in div:
+        per = "; ".join(f"`{p}`={','.join(s)[:8]}" for p, s in d["placements"].items())
+        out.append(f"| `{d['precision']}` | {d['prompt_index']} | "
+                   f"{d['n_distinct']} | {per} |")
+    unstable = sorted({p for d in div for p in d["unstable_within_placement"]})
+    out.append("")
+    if unstable:
+        out += [f"Output was also unstable *within* a single placement for: "
+                f"{', '.join('`' + p + '`' for p in unstable)}. That is "
+                "non-determinism independent of placement and needs separate "
+                "investigation.", ""]
+    return "\n".join(out)
+
+
+def place_labels(ax, items: list[tuple[float, float, str]], fontsize: int = 8,
+                 pad_px: float = 3.0) -> None:
+    """Annotate points, nudging labels that would overlap.
+
+    Frontier points can sit almost on top of one another -- which is the whole
+    reason they are both on the frontier -- so a fixed offset puts their labels
+    in the same place and neither is readable. Each label is tried at a series of
+    offsets and takes the first that clears every label already placed; a leader
+    line is drawn when the offset is large enough that the pairing is no longer
+    obvious. Boxes are estimated from the font metrics rather than measured, so
+    this is approximate by design and only has to be good enough to separate a
+    handful of labels."""
+    if not items:
+        return
+    # Candidate offsets in points, tried in order: right, left, then stacked.
+    candidates = [(9, 4), (9, -12), (-9, 4), (-9, -12),
+                  (9, 18), (9, -26), (-9, 18), (-9, -26),
+                  (0, 24), (0, -32)]
+    placed: list[tuple[float, float, float, float]] = []
+    inv = ax.transData
+
+    def overlaps(box, others):
+        x0, y0, x1, y1 = box
+        return any(not (x1 < o[0] or o[2] < x0 or y1 < o[1] or o[3] < y0)
+                   for o in others)
+
+    for x, y, text in sorted(items, key=lambda t: (-t[1], t[0])):
+        px, py = inv.transform((x, y))
+        w = len(text) * fontsize * 0.55 + 2 * pad_px
+        h = fontsize * 1.5 + 2 * pad_px
+        chosen = candidates[0]
+        for dx, dy in candidates:
+            left = px + dx if dx >= 0 else px + dx - w
+            box = (left - pad_px, py + dy - pad_px,
+                   left + w + pad_px, py + dy + h + pad_px)
+            if not overlaps(box, placed):
+                chosen = (dx, dy)
+                placed.append(box)
+                break
+        else:
+            left = px + chosen[0]
+            placed.append((left - pad_px, py + chosen[1] - pad_px,
+                           left + w + pad_px, py + chosen[1] + h + pad_px))
+        far = abs(chosen[1]) > 14 or chosen[0] < 0
+        ax.annotate(
+            text, (x, y), fontsize=fontsize, color=INK,
+            xytext=chosen, textcoords="offset points", zorder=5,
+            ha="left" if chosen[0] >= 0 else "right",
+            arrowprops=(dict(arrowstyle="-", linewidth=0.6, color=GRID,
+                             shrinkA=0, shrinkB=2) if far else None),
+        )
 
 
 def make_plots(summary: list[dict], loss: dict[str, float],
@@ -245,12 +517,8 @@ def make_plots(summary: list[dict], loss: dict[str, float],
 
         # Label only the frontier -- the points the reader has to act on. A value
         # beside all twelve is what made this plot unreadable before.
-        for s, x, q in pts:
-            if s["config"] in frontier:
-                ax.annotate(f"{s['precision']} / {s['placement']}",
-                            (x, q * 100), fontsize=8, color=INK,
-                            xytext=(9, 4), textcoords="offset points",
-                            zorder=5)
+        place_labels(ax, [(x, q * 100, f"{s['precision']} / {s['placement']}")
+                          for s, x, q in pts if s["config"] in frontier])
 
         # Quality loss spans 0% to ~900%; symlog keeps the near-zero cluster
         # readable without hiding the collapse. Linear below 1%, log above.
@@ -389,7 +657,167 @@ def make_plots(summary: list[dict], loss: dict[str, float],
         plt.close(fig)
         written.append(p)
 
+    # --- 4. net power vs throughput: the race-to-idle mechanism ---
+    # If power is flat along y while x spans several-fold, then energy per token
+    # is set by duration alone. Stating that as a sentence invites doubt; showing
+    # the two axes together settles it. Iso-energy hyperbolae (W = J/tok * tok/s)
+    # turn "same energy" into a visible curve rather than arithmetic.
+    pw = [s for s in summary if s.get("net_watts_med") and s.get("decode_tok_per_s_med")]
+    if energy and len(pw) > 1:
+        fig, ax = plt.subplots(figsize=(7.2, 4.6), facecolor=SURFACE)
+        ax.set_facecolor(SURFACE)
+
+        xs = [s["decode_tok_per_s_med"] for s in pw]
+        ys = [s["net_watts_med"] for s in pw]
+        # A handful of round iso-energy curves, not one per configuration --
+        # twelve near-identical dotted lines are clutter, not a reference grid.
+        jpts = [s["joules_per_token_med"] for s in pw if s.get("joules_per_token_med")]
+        lo, hi = min(jpts), max(jpts)
+        levels = [v for v in (0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0)
+                  if lo * 0.7 <= v <= hi * 1.3]
+        gx = [min(xs) * 0.85 + i * (max(xs) * 1.15 - min(xs) * 0.85) / 60
+              for i in range(61)]
+        for jpt in levels:
+            ax.plot(gx, [jpt * g for g in gx], color=GRID, linewidth=0.7,
+                    linestyle=":", zorder=1)
+            ax.annotate(f"{jpt:g} J/tok", (gx[-1], jpt * gx[-1]), fontsize=6,
+                        color=GRID, ha="right", va="bottom", zorder=1)
+
+        for s in pw:
+            ax.errorbar(
+                s["decode_tok_per_s_med"], s["net_watts_med"],
+                yerr=([[s["net_watts_med"] - s["net_watts_ci"][0]],
+                       [s["net_watts_ci"][1] - s["net_watts_med"]]]
+                      if s.get("net_watts_ci") else None),
+                fmt="none", ecolor=GRID, elinewidth=1.0, capsize=2, zorder=2)
+            ax.scatter(s["decode_tok_per_s_med"], s["net_watts_med"], s=110,
+                       c=PRECISION_COLOR.get(s["precision"], INK_MUTED),
+                       marker=PLACEMENT_MARKER.get(s["placement"], "o"),
+                       edgecolors=SURFACE, linewidths=2.0, zorder=3)
+
+        place_labels(ax, [(s["decode_tok_per_s_med"], s["net_watts_med"],
+                           s["placement"]) for s in pw], fontsize=7)
+        ax.set_xlabel("decode tokens/sec", color=INK_MUTED, fontsize=9)
+        ax.set_ylabel("net package power (W)", color=INK_MUTED, fontsize=9)
+        ax.set_title("Power is nearly flat across core islands; throughput is not.\n"
+                     "Dotted curves are constant joules per token.",
+                     color=INK, fontsize=10, loc="left")
+        # Bound the axis by the data, not by where the iso-energy curves happen
+        # to exit the frame. Letting the curves set the limit left three
+        # quarters of the panel empty and squashed the very flatness the figure
+        # exists to show. Zero stays on the axis because this is a power scale.
+        ax.set_ylim(0, max(ys) * 1.35)
+        ax.grid(True, color=GRID, linewidth=0.5, alpha=0.5)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("left", "bottom"):
+            ax.spines[spine].set_color(GRID)
+        ax.tick_params(colors=INK_MUTED, labelsize=8)
+        handles = [plt.Line2D([], [], marker=PLACEMENT_MARKER.get(p, "o"), ls="",
+                              color=INK_MUTED, markersize=7, label=p)
+                   for p in sorted({s["placement"] for s in pw})]
+        handles += [plt.Line2D([], [], marker="o", ls="", markersize=7,
+                               markerfacecolor=PRECISION_COLOR[k],
+                               markeredgecolor=SURFACE, color="none", label=k)
+                    for k in sorted({s["precision"] for s in pw})
+                    if k in PRECISION_COLOR]
+        ax.legend(handles=handles, frameon=False, fontsize=7, ncol=2,
+                  labelcolor=INK_MUTED, loc="upper left")
+        p = outdir / "power_vs_throughput.png"
+        fig.tight_layout(); fig.savefig(p, dpi=150, facecolor=SURFACE)
+        plt.close(fig)
+        written.append(p)
+
+    # --- 5. paired-ratio forest plot ---
+    # Twelve overlapping confidence intervals in a table are hard to compare.
+    # On one axis with a rule at 1.0, "which of these effects are real" is a
+    # glance rather than a reading exercise.
+    comparisons = _forest_data(rows, energy)
+    if comparisons:
+        fig, ax = plt.subplots(figsize=(7.2, 0.46 * len(comparisons) + 1.7),
+                               facecolor=SURFACE)
+        ax.set_facecolor(SURFACE)
+        ax.axvline(1.0, color=INK_MUTED, linewidth=1.0, zorder=1)
+        for i, c in enumerate(comparisons):
+            y = len(comparisons) - i
+            crosses = c["ci"] and c["ci"][0] <= 1.0 <= c["ci"][1]
+            col = INK_MUTED if crosses else PRECISION_COLOR.get(c["color_key"], INK)
+            if c["ci"]:
+                # End caps, and a marker small enough not to swallow the
+                # interval: on a well-powered dataset the CI can be narrower
+                # than a dot, and an invisible interval reads as a missing one.
+                ax.plot(c["ci"], [y, y], color=col, linewidth=1.4,
+                        solid_capstyle="butt", zorder=2)
+                for b in c["ci"]:
+                    ax.plot([b, b], [y - 0.16, y + 0.16], color=col,
+                            linewidth=1.4, zorder=2)
+            ax.scatter([c["ratio"]], [y], s=22, color=col, zorder=3,
+                       edgecolors=SURFACE, linewidths=1.0)
+        ax.set_yticks(range(1, len(comparisons) + 1))
+        ax.set_yticklabels([c["label"] for c in reversed(comparisons)],
+                           fontsize=8, color=INK)
+        ax.set_xscale("log")
+        # Ratios live in a narrow band around 1; default log tick labels render
+        # them as 10^0 and 2x10^0, which nobody reads as "1.0" and "2.0".
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+            lambda v, _: f"{v:g}"))
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.FuncFormatter(
+            lambda v, _: f"{v:g}" if v in (0.8, 1.5, 2.0, 3.0) else ""))
+        ax.set_xlabel(("joules/token ratio " if energy else "s/token ratio ")
+                      + "(log scale; <1 favours the first config)",
+                      color=INK_MUTED, fontsize=9)
+        ax.set_title("Paired per-prompt ratios, bootstrap 95% CI.\n"
+                     "Grey intervals cross 1.0 — the data does not resolve a "
+                     "direction. Some intervals are narrower than their marker.",
+                     color=INK, fontsize=10, loc="left")
+        ax.grid(True, axis="x", color=GRID, linewidth=0.5, alpha=0.5)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right", "left"):
+            ax.spines[spine].set_visible(False)
+        ax.spines["bottom"].set_color(GRID)
+        ax.tick_params(colors=INK_MUTED, labelsize=8)
+        p = outdir / "paired_ratios.png"
+        fig.tight_layout(); fig.savefig(p, dpi=150, facecolor=SURFACE)
+        plt.close(fig)
+        written.append(p)
+
     return written
+
+
+def _forest_data(rows: list[dict], energy: bool) -> list[dict]:
+    """The same comparisons paired_section() tabulates, shaped for plotting."""
+    cost_key = ((lambda r: (r.get("joules_per_new_token") or {}).get(ENERGY_DOMAIN))
+                if energy else
+                (lambda r: 1.0 / r["decode_tok_per_s"] if r["decode_tok_per_s"] else None))
+    by_cfg: dict[tuple, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_cfg[(r["precision"], r["placement"])].append(r)
+    if not by_cfg:
+        return []
+    precisions = sorted({p for p, _ in by_cfg})
+    placements = sorted({pl for _, pl in by_cfg})
+    ref_prec = "bf16" if "bf16" in precisions else precisions[0]
+    ref_place = "P-1t" if "P-1t" in placements else placements[0]
+
+    out = []
+    if (ref_prec, ref_place) in by_cfg:
+        base = by_cfg[(ref_prec, ref_place)]
+        for pl in placements:
+            if pl == ref_place or (ref_prec, pl) not in by_cfg:
+                continue
+            res = paired_ratio(by_cfg[(ref_prec, pl)], base, cost_key)
+            if res:
+                out.append({**res, "label": f"{pl} vs {ref_place}  ({ref_prec})",
+                            "color_key": ref_prec})
+        for p in precisions:
+            if p == ref_prec or (p, ref_place) not in by_cfg:
+                continue
+            res = paired_ratio(by_cfg[(p, ref_place)], base, cost_key)
+            if res:
+                out.append({**res, "label": f"{p} vs {ref_prec}  ({ref_place})",
+                            "color_key": p})
+    return out
 
 
 def main() -> int:
@@ -477,6 +905,14 @@ def main() -> int:
         "",
         fmt_table(summary, loss, frontier, energy),
         "",
+    ]
+    ps = paired_section(rows, energy)
+    if ps:
+        body += [ps]
+    ds = determinism_section(rows)
+    if ds:
+        body += [ds]
+    body += [
         "## Non-dominated configurations",
         "",
     ]

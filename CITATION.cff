@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software or dataset, please cite it as below."
+title: "tokenwatt: ground-truth energy measurement for LLM inference across heterogeneous CPU power islands"
+abstract: >-
+  A RAPL-based measurement harness for large language model inference on
+  heterogeneous CPUs. Separates prefill from decode, records KV cache growth at
+  every decode step, subtracts a verified idle baseline, and degrades to
+  timing-only measurement rather than estimating energy when the counters are
+  unreadable. Includes the complete dataset and every run discarded during
+  development, with the reason each was rejected.
+type: software
+authors:
+  - given-names: Muhammad Etisam
+    family-names: Ul Haq
+    affiliation: "Institute of Data Science, University of Engineering and Technology, Lahore"
+    email: 2026SMSDS122@student.uet.edu.pk
+repository-code: "https://github.com/etisamhaq/tokenwatt"
+license: MIT
+keywords:
+  - energy measurement
+  - RAPL
+  - large language models
+  - on-device inference
+  - heterogeneous multicore
+  - quantization
+  - sustainable computing
+version: "1.0.0"
+date-released: "2026-10-08"

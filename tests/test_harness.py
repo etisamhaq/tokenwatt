@@ -350,6 +350,202 @@ def test_quality_loss_empty_when_no_perplexity():
     assert analyze.quality_loss([{"config": "a", "perplexity": None}]) == {}
 
 
+
+# ------------------------------------------------- bootstrap / paired stats
+def _rows(precision, placement, prompt_vals, repeats=3):
+    """prompt_vals: {prompt_index: joules_per_token}. Repeats are exact copies,
+    so any spread the tests see comes from prompts, not from noise."""
+    out = []
+    for pi, v in prompt_vals.items():
+        for r in range(repeats):
+            out.append({
+                "config": f"cpu/{precision}/{placement}/t1",
+                "precision": precision, "placement": placement,
+                "prompt_index": pi, "repeat": r,
+                "decode_tok_per_s": 1.0 / v,
+                "joules_per_new_token": {analyze.ENERGY_DOMAIN: v},
+                "output_sha": f"{precision}-{pi}",
+            })
+    return out
+
+
+def test_bootstrap_ci_brackets_the_median():
+    lo, hi = analyze.bootstrap_ci([1.0, 1.1, 0.9, 1.05, 0.95])
+    assert lo <= 1.0 <= hi
+
+
+def test_bootstrap_ci_none_below_three_samples():
+    assert analyze.bootstrap_ci([1.0, 2.0]) is None
+
+
+def test_bootstrap_ci_on_constant_data_is_a_point():
+    assert analyze.bootstrap_ci([2.0] * 6) == (2.0, 2.0)
+
+
+def test_by_prompt_collapses_repeats_not_prompts():
+    rows = _rows("bf16", "P-1t", {0: 1.0, 1: 3.0}, repeats=4)
+    assert analyze.by_prompt(rows, lambda r: r["joules_per_new_token"]["package-0"]) \
+        == {0: 1.0, 1: 3.0}
+
+
+def test_paired_ratio_cancels_prompt_variance():
+    """Prompts differ 4x; the A/B ratio is exactly 2x inside every prompt. The
+    unpaired spread is huge, the paired answer is exact -- which is the whole
+    reason for pairing."""
+    a = _rows("x", "P", {0: 2.0, 1: 8.0})
+    b = _rows("y", "P", {0: 1.0, 1: 4.0})
+    res = analyze.paired_ratio(a, b,
+                               lambda r: r["joules_per_new_token"]["package-0"])
+    assert abs(res["ratio"] - 2.0) < 1e-9
+    assert res["n_prompts"] == 2
+    assert res["consistent"] is True
+
+
+def test_paired_ratio_flags_inconsistent_sign():
+    a = _rows("x", "P", {0: 2.0, 1: 1.0})
+    b = _rows("y", "P", {0: 1.0, 1: 2.0})
+    res = analyze.paired_ratio(a, b,
+                               lambda r: r["joules_per_new_token"]["package-0"])
+    assert res["consistent"] is False
+
+
+def test_paired_ratio_uses_only_shared_prompts():
+    a = _rows("x", "P", {0: 2.0, 5: 99.0})
+    b = _rows("y", "P", {0: 1.0})
+    res = analyze.paired_ratio(a, b,
+                               lambda r: r["joules_per_new_token"]["package-0"])
+    assert res["n_prompts"] == 1 and abs(res["ratio"] - 2.0) < 1e-9
+
+
+def test_paired_ratio_none_without_overlap():
+    a = _rows("x", "P", {0: 2.0})
+    b = _rows("y", "P", {1: 1.0})
+    assert analyze.paired_ratio(
+        a, b, lambda r: r["joules_per_new_token"]["package-0"]) is None
+
+
+# ------------------------------------------------------------ determinism
+def test_determinism_silent_when_placements_agree():
+    rows = _rows("bf16", "P-1t", {0: 1.0}) + _rows("bf16", "E", {0: 2.0})
+    # _rows keys the sha on (precision, prompt), so both placements match.
+    assert analyze.determinism_report(rows) == []
+
+
+def test_determinism_flags_placement_divergence():
+    rows = _rows("int8", "P-1t", {0: 1.0}) + _rows("int8", "LP-E", {0: 2.0})
+    for r in rows:
+        if r["placement"] == "LP-E":
+            r["output_sha"] = "diverged"
+    rep = analyze.determinism_report(rows)
+    assert len(rep) == 1
+    assert rep[0]["n_distinct"] == 2
+    assert rep[0]["precision"] == "int8"
+    assert rep[0]["unstable_within_placement"] == []
+
+
+def test_determinism_flags_instability_within_one_placement():
+    rows = _rows("bf16", "P-1t", {0: 1.0}, repeats=2)
+    rows[0]["output_sha"] = "a"
+    rows[1]["output_sha"] = "b"
+    rep = analyze.determinism_report(rows)
+    assert rep and rep[0]["unstable_within_placement"] == ["P-1t"]
+
+
+def test_determinism_ignores_rows_without_sha():
+    rows = _rows("bf16", "P-1t", {0: 1.0})
+    for r in rows:
+        r.pop("output_sha")
+    assert analyze.determinism_report(rows) == []
+
+
+# --------------------------------------------------- runner trial structure
+def test_output_sha_is_stable_and_distinguishing():
+    import runner
+    assert runner.output_sha("abc") == runner.output_sha("abc")
+    assert runner.output_sha("abc") != runner.output_sha("abd")
+
+
+def test_trials_are_a_full_prompt_by_repeat_cross():
+    """The bug this replaces: prompts were cycled by repeat index, so 5 repeats
+    over 4 prompts measured prompt 0 twice and called the spread noise."""
+    import runner
+    prompts = ["p0", "p1", "p2"]
+    repeats = 4
+    trials = [(pi, rep, prompt)
+              for pi, prompt in enumerate(prompts)
+              for rep in range(repeats)]
+    assert len(trials) == len(prompts) * repeats
+    for pi in range(len(prompts)):
+        assert sorted(r for p, r, _ in trials if p == pi) == list(range(repeats))
+    # every prompt measured the same number of times
+    counts = {pi: sum(1 for p, _, _ in trials if p == pi) for pi in range(3)}
+    assert set(counts.values()) == {repeats}
+
+
+def test_label_placement_separates_coincident_points():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    analyze.place_labels(ax, [(0.5, 0.5, "alpha"), (0.5, 0.5, "beta"),
+                              (0.5, 0.5, "gamma")])
+    offsets = {tuple(a.get_position()) for a in ax.texts}
+    assert len(ax.texts) == 3
+    assert len(offsets) == 3, "coincident labels must not share an offset"
+    plt.close(fig)
+
+
+
+# ------------------------------------------------------------ warmup settling
+class _RampBackend:
+    """Throughput climbs toward a plateau, like a real frequency/cache ramp."""
+    def __init__(self, rates):
+        self.rates = list(rates); self.calls = 0
+    def generate(self, prompt, max_new_tokens):
+        r = self.rates[min(self.calls, len(self.rates) - 1)]
+        self.calls += 1
+        return backends.GenResult(text="x", n_prompt_tokens=1, n_new_tokens=10,
+                                  prefill_s=0.1, decode_s=10.0 / r)
+
+
+def test_warmup_stops_once_throughput_plateaus():
+    import runner
+    b = _RampBackend([9.0, 12.0, 13.5, 13.6, 13.6])
+    rounds, settled = runner.warm_until_settled(b, "p", 256)
+    assert settled is True
+    assert rounds == 4          # 13.5 vs 13.6 is within 5%
+    assert b.calls == 4
+
+
+def test_warmup_reports_failure_when_it_never_settles():
+    import runner
+    b = _RampBackend([1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0])
+    rounds, settled = runner.warm_until_settled(b, "p", 256)
+    assert settled is False and rounds == 6
+
+
+def test_warmup_always_runs_at_least_two_rounds():
+    """One warmup was the old behaviour and is what this replaces -- a backend
+    that looks stable immediately must still be warmed twice."""
+    import runner
+    b = _RampBackend([10.0, 10.0, 10.0])
+    rounds, settled = runner.warm_until_settled(b, "p", 256)
+    assert rounds == 2 and settled is True
+
+
+def test_warmup_uses_full_measurement_length():
+    """An 8-token warmup does not populate the KV cache a 256-token run uses."""
+    import runner
+    seen = []
+    class B(_RampBackend):
+        def generate(self, prompt, max_new_tokens):
+            seen.append(max_new_tokens)
+            return super().generate(prompt, max_new_tokens)
+    runner.warm_until_settled(B([10.0, 10.0]), "p", 256)
+    assert seen == [256, 256]
+
+
 # ----------------------------------------------------------------- main
 def _run_all() -> int:
     fns = [(n, f) for n, f in sorted(globals().items())

@@ -3,3 +3,7 @@ __pycache__/
 *.log
 .venv/
 # Figures under runs/ ARE committed - they are the point of the repo.
+
+# Working notes, not artifact content
+PLAN.md
+PAPER_OUTLINE.md

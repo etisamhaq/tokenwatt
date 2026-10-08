@@ -43,6 +43,7 @@ silently passed off as having measured energy.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import resource
@@ -166,15 +167,58 @@ def peak_rss_bytes() -> int:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
 
 
+def warm_until_settled(backend, prompt: str, max_new_tokens: int,
+                       tolerance: float = 0.05, max_rounds: int = 6,
+                       min_rounds: int = 2) -> tuple[int, bool]:
+    """Generate at full length until throughput stops climbing. Discarded.
+
+    A single short warmup is not enough. Measured at 256 tokens, decode
+    throughput rose by up to 20% across the trials of one configuration -- the
+    first measurements were still on the frequency and cache ramp, so the median
+    depended on where in that ramp the trials happened to fall. The ramp is also
+    not the same size for every configuration (20% for fp32/P-1t against 2% for
+    bf16/P-1t), so it does not cancel when configurations are compared, and it
+    contaminates precisely the precision comparison this study wants to make.
+
+    Warming at the *measurement* length matters: an 8-token warmup does not
+    populate the KV cache or reach the steady state a 256-token generation
+    spends most of its time in.
+
+    Returns (rounds run, whether it converged). A configuration that never
+    settles is recorded as unsettled rather than quietly treated as warm."""
+    last = None
+    for i in range(1, max_rounds + 1):
+        gen = backend.generate(prompt, max_new_tokens)
+        rate = gen.decode_tok_per_s
+        if (last is not None and i >= min_rounds and rate > 0 and last > 0
+                and abs(rate - last) / max(rate, last) <= tolerance):
+            return i, True
+        last = rate
+    return max_rounds, False
+
+
+def output_sha(text: str) -> str:
+    """Short digest of a generation, for detecting placement-dependent output.
+
+    Greedy decode at a fixed seed should be bit-identical regardless of which
+    core island runs it. When it is not -- different islands can dispatch to
+    different kernels, and on this SoC the LP-E cores do -- the digests diverge
+    and analyze.py reports it. Without this the divergence is only visible as an
+    unexplained perplexity difference, which is easy to mistake for noise."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
             run_idle_watts: dict[str, float] | None, corpus: str,
             run_quality: bool, seed: int, needle_repeats: int = 40,
             measure_energy: bool = True, idle_seconds: float = 10.0,
-            baseline_mode: str = "run"
+            baseline_mode: str = "run", prompts: list[str] | None = None
             ) -> tuple[list[dict], dict[str, float] | None]:
-    """Load one configuration, warm it up, baseline it, then measure `repeats`.
+    """Load one configuration, warm it up, baseline it, then measure it.
 
-    Returns (rows, per-config idle watts) so the caller can report drift."""
+    Produces len(prompts) x repeats rows. Returns (rows, per-config idle watts)
+    so the caller can report drift."""
+    prompts = list(prompts or PROMPTS)
     rows: list[dict] = []
 
     with topology.Affinity(cfg.cpus):
@@ -185,7 +229,8 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
         load_s = time.perf_counter() - t_load
 
         # Thermal soak / cache warm. Discarded.
-        backend.generate(PROMPTS[0], max_new_tokens=min(8, max_new_tokens))
+        warmups, warm_stable = warm_until_settled(
+            backend, prompts[0], max_new_tokens)
 
         # Baseline. "run" reuses one baseline measured on a quiet machine before
         # any load; "per-config" re-measures here, but only after settling, since
@@ -204,8 +249,16 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
                                         needle_repeats=needle_repeats,
                                         run_needle=True)
 
-        for rep in range(repeats):
-            prompt = PROMPTS[rep % len(PROMPTS)]
+        # Full cross of prompts x repeats, NOT prompts cycled by repeat index.
+        # Cycling made "5 repeats" mean "4 prompts, one of them twice", so the
+        # spread across those rows folded prompt-to-prompt variation into what was
+        # reported as measurement noise. With the cross, `repeat` varies only the
+        # measurement and `prompt_index` only the input, which lets analyze.py
+        # pair on prompt_index across configurations and cancel prompt variance.
+        trials = [(pi, rep, prompt)
+                  for pi, prompt in enumerate(prompts)
+                  for rep in range(repeats)]
+        for prompt_index, rep, prompt in trials:
             # Energy availability is fixed for the whole run (see main()).
             # Probing per repeat means a permission change mid-run silently
             # yields a file where some configurations have joules and others do
@@ -246,7 +299,8 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
                 "placement": cfg.placement,
                 "threads": cfg.threads,
                 "repeat": rep,
-                "prompt_index": rep % len(PROMPTS),
+                "prompt_index": prompt_index,
+                "output_sha": output_sha(gen.text),
                 "model": model,
                 "load_s": round(load_s, 3),
                 "param_bytes": backend.param_bytes,
@@ -268,6 +322,8 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
                 "idle_watts_config": idle_watts or None,
                 "baseline_mode": baseline_mode,
                 "baseline_stable": idle_stable,
+                "warmup_rounds": warmups,
+                "warmup_settled": warm_stable,
                 "net_negative_domains": negative_domains or None,
                 "joules_per_new_token": (
                     {k: v / gen.n_new_tokens for k, v in
@@ -306,8 +362,15 @@ def main() -> int:
                     help="comma list, or 'ALL' to sweep every island")
     ap.add_argument("--threads", default="",
                     help="comma list of thread counts; default = cores in placement")
-    ap.add_argument("--max-new-tokens", type=int, default=32)
-    ap.add_argument("--repeats", type=int, default=5)
+    ap.add_argument("--max-new-tokens", type=int, default=256,
+                    help="At 32 the measurement window is ~3 s and the idle "
+                         "baseline exceeds the net signal; 256 keeps the "
+                         "baseline a minority of the total.")
+    ap.add_argument("--repeats", type=int, default=5,
+                    help="True repeats PER PROMPT. Rows per configuration is "
+                         "n_prompts x repeats.")
+    ap.add_argument("--prompts", type=int, default=len(PROMPTS),
+                    help=f"How many of the {len(PROMPTS)} fixed prompts to use.")
     ap.add_argument("--idle-seconds", type=float, default=10.0)
     ap.add_argument("--baseline", choices=("run", "per-config"), default="run",
                     help="'run' (default) uses one baseline measured before any "
@@ -337,6 +400,10 @@ def main() -> int:
     if not matrix:
         raise SystemExit("empty configuration matrix")
 
+    if not 1 <= a.prompts <= len(PROMPTS):
+        raise SystemExit(f"--prompts must be in 1..{len(PROMPTS)}")
+    prompts = PROMPTS[:a.prompts]
+
     info = machine_info()
     print(f"machine  : {info['processor'] or platform.machine()}")
     print(f"islands  : "
@@ -345,7 +412,9 @@ def main() -> int:
     print(f"RAPL     : {'readable' if info['rapl_readable'] else 'NOT readable'}")
     if not info["rapl_readable"]:
         print("           energy will be recorded as null - see README to fix")
-    print(f"configs  : {len(matrix)} x {a.repeats} repeats")
+    print(f"configs  : {len(matrix)} x {len(prompts)} prompts x {a.repeats} repeats "
+          f"= {len(matrix) * len(prompts) * a.repeats} rows")
+    print(f"tokens   : {a.max_new_tokens} new per generation")
 
     # One decision, applied uniformly. If RAPL is readable a baseline is
     # mandatory: without it only gross joules exist, and gross joules at these
@@ -364,10 +433,15 @@ def main() -> int:
     baselines: dict[str, dict[str, float]] = {}
     out_path = Path(a.out)
     with out_path.open("w") as f:
+        # n_prompts and the prompt texts are recorded because the design is
+        # prompts x repeats and the paired analysis depends on which axis is
+        # which. A reader of the file should not have to infer the design from
+        # the distinct values of prompt_index.
         f.write(json.dumps({"_meta": True, "machine": info,
                             "idle_watts_reference": idle, "model": a.model,
                             "max_new_tokens": a.max_new_tokens,
-                            "repeats": a.repeats, "seed": a.seed}) + "\n")
+                            "repeats": a.repeats, "n_prompts": len(prompts),
+                            "prompts": prompts, "seed": a.seed}) + "\n")
         for i, cfg in enumerate(matrix, 1):
             print(f"[{i}/{len(matrix)}] {cfg.label} ... ", end="", flush=True)
             t0 = time.perf_counter()
@@ -378,7 +452,8 @@ def main() -> int:
                     needle_repeats=a.needle_repeats,
                     measure_energy=measure_energy,
                     idle_seconds=a.idle_seconds,
-                    baseline_mode=a.baseline)
+                    baseline_mode=a.baseline,
+                    prompts=prompts)
             except NotImplementedError as e:
                 print(f"skipped ({e})")
                 continue

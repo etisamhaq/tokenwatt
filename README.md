@@ -4,10 +4,10 @@
 
 <p align="center">
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux-green.svg)
 ![PyTorch](https://img.shields.io/badge/PyTorch-CPU-orange.svg)
-![Tests](https://img.shields.io/badge/Tests-39%20Passing-success.svg)
+![Tests](https://img.shields.io/badge/Tests-58%20Passing-success.svg)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)
 
 </p>
@@ -259,7 +259,7 @@ The benchmarking pipeline is designed to measure inference consistently across m
                CPU Affinity Pinning
                         │
                         ▼
-                 Warm-up Generation
+            Warm-up Until Settled (<5%)
                         │
                         ▼
                 Benchmark Repetitions
@@ -288,6 +288,19 @@ Each benchmark configuration records
 
 using identical prompts, seeds and evaluation corpus.
 
+**Warm-up is not a single generation.** Each configuration is warmed at the full
+measurement length, repeatedly, until two consecutive warm-ups agree within 5% —
+two to five rounds were needed here. A single 8-token warm-up left throughput
+still climbing when trials began, producing a **+20.5% drift inside one
+configuration** at 256 tokens, and because the drift size varied by
+configuration it did not cancel between them. It had inverted the BF16-vs-FP32
+result. See `runs/warmup-ablation/`.
+
+**Repeats are repeats.** Each configuration is measured on 4 fixed prompts with
+5 true repeats each. Ratios are formed *within* a prompt and then aggregated,
+which cancels prompt-to-prompt variation, and reported as a geometric mean with
+a bootstrap 95% interval. No direction is claimed where an interval spans 1.0.
+
 ---
 
 # Results
@@ -304,20 +317,20 @@ The primary dataset is based on
 
 > **Qwen2.5-0.5B-Instruct**
 
-evaluated across **12 hardware configurations**, with **5 repeated measurements per configuration**, using measured Intel RAPL energy.
+evaluated across **12 hardware configurations**, with **4 fixed prompts x 5 true repeats = 20 measurements per configuration** (240 rows), **256 generated tokens each**, using measured Intel RAPL energy.
 
 ## Headline Results
 
-| Configuration | J/token | tok/s | Net W | Perplexity | Needle |
-|---------------|---------|--------|-------|------------|---------|
-| **BF16 / P-cores (1 thread/core)** | **0.269** | **17.7** | **4.78** | **11.091** | **3/3** |
-| BF16 / P-cores (SMT) | 0.299 | 14.8 | 4.41 | 11.091 | 3/3 |
-| BF16 / E-cores | 0.353 | 14.4 | 5.10 | 11.091 | 3/3 |
-| BF16 / LP-E cores | 0.621 | 7.4 | 4.58 | 11.091 | 3/3 |
-| FP32 / P-cores (1 thread/core) | 0.376 | 9.5 | 3.55 | 11.178 | 3/3 |
-| INT8 Dynamic / P-cores | 0.266 | 36.3 | 9.65 | **113.763** | **0/3** |
+| Configuration | J/token | tok/s | Gross W | Net W | Perplexity | Needle |
+|---------------|---------|--------|---------|-------|------------|---------|
+| **BF16 / P-cores (1 thread/core)** | **0.1758** | **16.1** | **14.00** | **2.77** | **12.427** | **3/3** |
+| BF16 / P-cores (SMT) | 0.1878 | 15.1 | 14.01 | 2.77 | 12.427 | 3/3 |
+| BF16 / E-cores | 0.1987 | 14.4 | 14.01 | 2.78 | 12.427 | 3/3 |
+| BF16 / LP-E cores | 0.4053 | 7.0 | 14.00 | 2.77 | 12.427 | 3/3 |
+| FP32 / P-cores (1 thread/core) | 0.2313 | 12.0 | 14.00 | 2.77 | 12.449 | 3/3 |
+| INT8 Dynamic / P-cores | 0.1281 | 27.7 | 14.78 | 3.55 | **109.953** | **0/3** |
 
-The measurements lead to three primary observations discussed below.
+The measurements lead to four primary observations discussed below.
 
 ---
 
@@ -325,16 +338,18 @@ The measurements lead to three primary observations discussed below.
 
 ## Efficiency cores were **not** the most energy-efficient.
 
-LP-E cores required **2.31× more joules per generated token** than the Performance cores.
+LP-E cores required **2.306× more joules per generated token** than the Performance cores, with a bootstrap 95% interval of **[2.301, 2.314]**.
 
 Although LP-E cores consumed nearly the same power as P-cores, they produced substantially fewer tokens per second.
 
-| Placement | Net Power | Throughput |
-|------------|-----------|------------|
-| P-1t | 4.78 W | 17.7 tok/s |
-| LP-E | 4.58 W | 7.4 tok/s |
+| Placement | Gross Power | Throughput |
+|------------|-------------|------------|
+| P-1t | 14.00 W | 16.1 tok/s |
+| LP-E | 14.00 W | 7.0 tok/s |
 
-Power differed by only **4%**, while throughput differed by **2.39×**.
+Package power is **14.00 W for every FP32 and BF16 configuration measured**, across islands spanning 7.0 to 16.1 tok/s — against a 40 W platform limit, so this is not a power cap. Power differs by under **0.1%** while throughput differs by **2.3×**.
+
+Because power is constant, energy per token reduces to duration, and that is a testable prediction. The measured energy ratios match the inverse of the independently measured throughput ratios to within **1.1%** in every memory-bound comparison.
 
 The increased energy cost therefore came almost entirely from **longer execution time**, not higher instantaneous power.
 
@@ -343,6 +358,8 @@ This is a direct example of **race-to-idle**:
 > Finishing the workload sooner consumed less total energy than executing slowly at nearly the same power.
 
 A throughput-only benchmark would reach the same ranking here only by coincidence and would not explain *why* the ranking occurred.
+
+The penalty **grows on smaller models** — 3.712× [3.159, 4.342] on SmolLM2-135M — and **survives a 4× longer context**, at 2.251× for 1024-token generations.
 
 ---
 
@@ -354,39 +371,46 @@ Across every metric collected, **BF16 consistently outperformed FP32**.
 
 | Metric | FP32 | BF16 | Improvement |
 |--------|------|------|-------------|
-| Energy (J/token) | 0.376 | **0.269** | **28% lower** |
-| Throughput | 9.5 tok/s | **17.7 tok/s** | **86% higher** |
-| Perplexity | 11.178 | **11.091** | Marginally better |
+| Energy (J/token) | 0.2313 | **0.1758** | **1.319× [1.309, 1.330] lower** |
+| Throughput | 12.0 tok/s | **16.1 tok/s** | **34% higher** |
+| Perplexity | 12.449 | **12.427** | Marginally better |
 
 Unlike many optimization techniques, BF16 introduced **no measurable tradeoff** between performance and quality in this workload.
 
-The reduced precision significantly improved throughput while simultaneously reducing energy consumption and maintaining essentially identical model quality.
+**But the advantage is island-dependent.** On the low-power cores it disappears entirely:
+
+| Island | FP32/BF16 energy ratio |
+|---------|------------------------|
+| P-1t | 1.319 [1.309, 1.330] |
+| P-smt | 1.335 [1.303, 1.367] |
+| E | 1.173 [1.132, 1.205] |
+| **LP-E** | **0.994 [0.989, 1.000]** |
+
+FP32 and BF16 reach the same 7.0 tok/s and the same ~0.40 J/token on LP-E — most likely because those cores lack the BF16 instruction support the P-cores have. **Precision and placement cannot be chosen independently.**
 
 ---
 
 # Key Finding 3
 
-## INT8 Dynamic improved latency—but not energy
+## INT8 Dynamic saves energy — and is still the wrong choice
 
-Dynamic quantization approximately doubled inference throughput.
-
-| Metric | BF16 | INT8 Dynamic |
-|---------|------|--------------|
-| Throughput | 17.7 tok/s | **36.3 tok/s** |
-| Net Power | 4.78 W | **9.65 W** |
-| Energy | 0.269 J/token | 0.266 J/token |
-
-Although throughput increased by approximately **2.05×**, instantaneous power consumption also increased by **2.02×**.
-
-As a result,
-
-> **Energy per generated token remained effectively unchanged.**
-
-The quality impact, however, was dramatic.
+> **Corrected.** An earlier version of this README reported that INT8 left energy
+> per token unchanged. That rested on 24-token generations with an unsettled
+> warmup. Remeasured at 256 tokens, INT8 is genuinely **27% cheaper**.
 
 | Metric | BF16 | INT8 Dynamic |
 |---------|------|--------------|
-| Perplexity | 11.091 | **113.763** |
+| Throughput | 16.1 tok/s | **27.7 tok/s** |
+| Gross Power | 14.00 W | **14.78 W** |
+| Energy | 0.1758 J/token | **0.1281 J/token** |
+
+INT8 is the one precision whose power is **not** flat — it spans 13.96–15.92 W — and it is correspondingly the one precision for which the duration identity fails, by up to **27.5%** against a worst case of 1.1% for FP32 and BF16. That exception is the strongest evidence the memory-bound explanation is the right one.
+
+The energy saving is real: **0.730× [0.726, 0.733]**. The quality cost makes it unusable.
+
+| Metric | BF16 | INT8 Dynamic |
+|---------|------|--------------|
+| Perplexity | 12.427 | **109.953** (+785%) |
 | Needle Retrieval | 3/3 | **0/3** |
 
 The results suggest that the issue lies not with **8-bit quantization itself**, but with the **quantization granularity**.
@@ -413,20 +437,16 @@ The failed experiments are intentionally committed because they document mistake
 
 | Directory | Description |
 |------------|-------------|
-| `runs/qwen2.5-0.5b/` | Final experimental dataset used in the findings |
-| `runs/smollm2-135m/` | Same benchmark matrix on a smaller model (before RAPL access) |
+| `runs/qwen2.5-0.5b-v3/` | **Canonical dataset.** 12 configurations, 4 prompts × 5 repeats, 256 tokens, settled warmup |
+| `runs/smollm2-135m-v3/` | Same matrix on a 135M model — the scale check |
+| `runs/longctx-1024/` | 1024-token generations, BF16, best vs worst island |
+| `runs/warmup-ablation/` | Superseded: one 8-token warmup gave +20.5% intra-config drift and reversed the BF16/FP32 result |
+| `runs/qwen2.5-0.5b/` | Superseded: 24-token generations, prompts cycled by repeat index |
+| `runs/smollm2-135m/` | Superseded: no energy (measured before RAPL access) |
 | `runs/discarded/` | Partially measured energy after permission changes |
 | `runs/failed-perconfig-baseline/` | Alternative baseline methodology that increased measurement noise by 11× |
 
-Both failed datasets include dedicated documentation explaining why the measurements were rejected.
-
-The second experiment directly motivated the current implementation of
-
-```text
---baseline per-config
-```
-
-which now verifies stability before trusting an idle baseline measurement.
+Five superseded datasets include dedicated documentation explaining why the measurements were rejected. Between them they are why the harness now settles its warmup, verifies its baseline, and crosses prompts against repeats instead of cycling them.
 
 ---
 
