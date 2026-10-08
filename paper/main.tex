@@ -19,7 +19,7 @@
 \usepackage[hidelinks]{hyperref}
 
 \newif\ifdraftmode
-\draftmodetrue
+\draftmodefalse
 \ifdraftmode
   \newcommand{\TODO}[1]{{\color{red}\textbf{[TODO: #1]}}}
 \else
@@ -35,9 +35,9 @@ for LLM Decode on x86 Heterogeneous SoCs}
 \thanks{M. E. Ul Haq is with the Institute of Data Science, University of
 Engineering and Technology, Lahore, Pakistan
 (e-mail: 2026SMSDS122@student.uet.edu.pk).}%
+\thanks{ORCID: \url{https://orcid.org/0009-0008-5016-6478}.}%
 \thanks{Artifact, including the measurement harness, the complete dataset and
-the discarded runs, is available at \TODO{archival URL -- Zenodo DOI or
-IEEE DataPort}.}}
+every discarded run, is archived at \href{https://doi.org/10.5281/zenodo.23243517}{doi:10.5281/zenodo.23243517}.}}
 
 \markboth{IEEE Transactions on Sustainable Computing}%
 {Ul Haq: Race to Idle}
@@ -46,35 +46,28 @@ IEEE DataPort}.}}
 
 % ---------------------------------------------------------------------------
 \begin{abstract}
-Heterogeneous consumer SoCs expose several core islands with different
-power--performance characteristics, and the naming of those islands---%
-\emph{performance}, \emph{efficiency}, \emph{low-power efficiency}---carries an
-implicit scheduling recommendation. We test that recommendation for large
-language model decode and find it inverted. Using Intel RAPL counters rather
-than estimates, we measure energy, latency and output quality across twelve
-configurations of numeric precision and core placement on an Intel Core Ultra~7
-155H, with 240 measurements, prefill and decode timed separately, and the KV
-cache sized at every decode step. At fixed precision and byte-identical output,
-the low-power island costs $2.306\times$ [2.301, 2.314] the energy per
-generated token of the performance island. The mechanism is directly
-observable: gross package power is 14.00\,W for every fp32 and bf16
-configuration, across islands whose throughput spans 7.0 to 16.1 tokens per
-second, against a 40\,W platform limit. With power constant, energy per token
-reduces to duration, and the measured energy ratios match the inverse of the
-independently measured throughput ratios to within 1.1\%. Decode is
-memory-bandwidth-bound, so the island issuing the loads has little influence on
-the power drawn, and the correct policy is to race to idle. The identity fails
-only for int8, the one precision whose power is not flat---which we take as
-confirmation of the mechanism rather than a counterexample. We further report
-that the bf16 energy advantage, $1.319\times$ on the performance cores,
-disappears entirely on the low-power island, so precision and placement cannot
-be chosen independently; and that per-tensor dynamic int8 does save 27\% energy
-while raising perplexity by 785\% and eliminating needle retrieval. The effect
-strengthens rather than weakens at smaller model scale, reaching
-$3.712\times$ on a 135\,M-parameter model, and is unchanged by a $4\times$
-longer context. Our result is the opposite of one reported for ARM mobile
-parts, and we identify the single measurement that distinguishes the two
-cases. All measurements, the harness and the runs we discarded are released.
+Heterogeneous consumer SoCs expose core islands whose names---\emph{performance},
+\emph{efficiency}, \emph{low-power efficiency}---carry an implicit scheduling
+recommendation. We test that recommendation for large language model decode and
+find it inverted. Using Intel RAPL counters rather than estimates, we take 240
+measurements across twelve configurations of precision and core placement on an
+Intel Core Ultra~7 155H, timing prefill and decode separately. At fixed
+precision and byte-identical output, the low-power island costs $2.306\times$
+[2.301, 2.314] the energy per generated token of the performance island. The
+mechanism is directly observable: gross package power is 14.00\,W for every
+fp32 and bf16 configuration, across islands whose throughput spans 7.0 to
+16.1\,tok/s, against a 40\,W platform limit. With power constant, energy per
+token reduces to duration, and the measured energy ratios match inverse
+throughput to within 1.1\%. Decode is memory-bandwidth-bound, so the island
+issuing the loads barely affects the power drawn, and the correct policy is to
+race to idle. The identity fails only for int8, the one precision whose power is
+not flat, which we take as confirmation rather than counterexample. We further
+find that the bf16 energy advantage disappears entirely on the low-power island,
+so precision and placement cannot be chosen independently; that per-tensor int8
+saves 27\% energy while raising perplexity by 785\%; and that the effect
+strengthens at smaller model scale, reaching $3.712\times$ on a 135\,M model.
+Our result is the opposite of one reported for ARM mobile, and we identify the
+single measurement that distinguishes the two cases.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -463,9 +456,9 @@ the same runs, span 13.96 to 15.92\,W (Section~\ref{sec:int8break}). The
 instrument resolves power differences on this platform; fp32 and bf16 simply do
 not produce any.
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\columnwidth]{figures/power_vs_throughput.png}
+\includegraphics[width=0.78\textwidth]{figures/power_vs_throughput.png}
 \caption{Net package power against decode throughput, one point per
 configuration. fp32 (blue) and bf16 (orange) lie on a horizontal line at
 2.77\,W while throughput varies more than twofold; only int8 (green) departs
@@ -473,7 +466,7 @@ from it. Dotted curves are constant joules per token, so a point's distance
 along a curve is pure duration. This is the whole argument of
 Section~\ref{sec:islands} in one panel.}
 \label{fig:power}
-\end{figure}
+\end{figure*}
 
 With power constant, energy per token reduces to duration, and that is a
 prediction rather than a description. Fig.~\ref{fig:power} shows the two
@@ -505,14 +498,14 @@ int8 & LP-E  & 2.509 & 2.447 & $+2.54\%$ \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\columnwidth]{figures/paired_ratios.png}
+\includegraphics[width=0.78\textwidth]{figures/paired_ratios.png}
 \caption{Paired per-prompt energy ratios with bootstrap 95\% intervals, log
 scale, rule at unity. Every comparison in this study on one axis. Several
 intervals are narrower than their marker.}
 \label{fig:forest}
-\end{figure}
+\end{figure*}
 
 Two consequences follow and are worth separating. The ordering is robust: it
 rests on a $2.3\times$ duration difference against a power difference of under
@@ -1006,7 +999,7 @@ policy is to race to idle.
 \section*{Artifact Availability}
 The measurement harness, the complete dataset including every discarded run,
 and the analysis that generates every table and figure in this paper are
-available at \TODO{archival URL}. Five superseded runs are included
+archived at \href{https://doi.org/10.5281/zenodo.23243517}{doi:10.5281/zenodo.23243517}. Five superseded runs are included
 deliberately, each with a written account of why it was rejected---short
 measurement windows, prompts cycled by repeat index, an unsettled warmup, a
 per-configuration baseline that made the data noisier, and a half-measured
@@ -1014,5 +1007,22 @@ dataset---because the reason a measurement was discarded is part of the method.
 
 \bibliographystyle{IEEEtran}
 \bibliography{refs}
+
+% IEEEbiographynophoto avoids needing a portrait at submission. Switch to
+% \begin{IEEEbiography}[{\includegraphics[...]{photo}}]{...} if a photo is
+% wanted for the camera-ready version.
+\begin{IEEEbiographynophoto}{Muhammad Etisam Ul Haq}
+received the B.S. degree in data science from the Punjab University College of
+Information Technology (PUCIT), University of the Punjab, Lahore, Pakistan, and
+is currently pursuing the M.S. degree in data science at the Institute of Data
+Science, University of Engineering and Technology, Lahore, Pakistan.
+
+He works as a machine learning engineer, where his practice covers large
+language model fine-tuning and inference serving, retrieval-augmented
+generation, and private inference on non-CUDA accelerators. His research
+interests include the energy efficiency of on-device machine learning,
+measurement methodology for heterogeneous processors, and the systems side of
+language model deployment.
+\end{IEEEbiographynophoto}
 
 \end{document}

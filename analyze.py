@@ -777,10 +777,12 @@ def make_plots(summary: list[dict], loss: dict[str, float],
         ax.set_xlabel(("joules/token ratio " if energy else "s/token ratio ")
                       + "(log scale; <1 favours the first config)",
                       color=INK_MUTED, fontsize=9)
+        # Three short lines rather than two long ones: the previous title ran
+        # off the right edge of the canvas.
         ax.set_title("Paired per-prompt ratios, bootstrap 95% CI.\n"
-                     "Grey intervals cross 1.0 — the data does not resolve a "
-                     "direction. Some intervals are narrower than their marker.",
-                     color=INK, fontsize=10, loc="left")
+                     "Grey intervals cross 1.0 — direction unresolved.\n"
+                     "Some intervals are narrower than their marker.",
+                     color=INK, fontsize=9.5, loc="left")
         ax.grid(True, axis="x", color=GRID, linewidth=0.5, alpha=0.5)
         ax.set_axisbelow(True)
         for spine in ("top", "right", "left"):

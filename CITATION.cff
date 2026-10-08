@@ -14,7 +14,9 @@ authors:
     family-names: Ul Haq
     affiliation: "Institute of Data Science, University of Engineering and Technology, Lahore"
     email: 2026SMSDS122@student.uet.edu.pk
+    orcid: "https://orcid.org/0009-0008-5016-6478"
 repository-code: "https://github.com/etisamhaq/tokenwatt"
+doi: "10.5281/zenodo.23243517"
 license: MIT
 keywords:
   - energy measurement
