@@ -436,6 +436,23 @@ whereas formats such as
 
 use finer-grained scaling strategies that are generally reported to preserve quality much better.
 
+**Reproducing this table.** The GGUF schemes run through a second engine,
+llama.cpp, rather than PyTorch — which is also what lets the flat-power result
+be checked against an independent implementation (13.99–14.01 W, against
+14.00 W under PyTorch). It needs one extra dependency and two weight files
+that are too large to commit:
+
+```bash
+pip install llama-cpp-python        # optional; the other sweeps run without it
+# then fetch the GGUF weights -- see models/README.md
+make sweep-kquant                   # energy, both schemes, P-1t vs LP-E
+make kquant-perplexity              # quality, measured in a separate pass
+```
+
+Quality is measured separately on purpose: reading per-position logits needs
+`logits_all=True`, which costs about half the decode throughput (68.6 → 32.7
+tok/s measured) and would corrupt any energy figure taken under it.
+
 ---
 
 # Experimental Runs

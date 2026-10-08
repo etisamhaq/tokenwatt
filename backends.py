@@ -320,7 +320,17 @@ class LlamaCppBackend(Backend):
         perplexity needs and which costs roughly half the decode throughput
         (measured: 68.6 -> 32.7 tok/s). Timed generation therefore always runs
         with it off, and logprobs() reloads around its own measurement."""
-        from llama_cpp import Llama
+        try:
+            from llama_cpp import Llama
+        except ImportError as e:  # optional dependency; see requirements.txt
+            raise RuntimeError(
+                "the llamacpp engine needs llama-cpp-python: "
+                "pip install llama-cpp-python (see models/README.md)") from e
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(
+                f"GGUF weights not found at {self.model_path}. They are not "
+                "committed (1.1 GB, over GitHub's per-file limit); "
+                "models/README.md has the download commands.")
         self._logits_all = logits_all
         self.llm = Llama(
             model_path=self.model_path,

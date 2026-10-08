@@ -8,3 +8,8 @@ numpy>=1.24           # tested: 1.26.4
 
 # analyze.py only. Everything else runs without it; plots are skipped if absent.
 matplotlib>=3.7       # tested: 3.10.0
+
+# Section V-D only (the GGUF K-quant comparison, `make sweep-kquant`). The
+# PyTorch sweeps that produce every other number run without it. Install the
+# weights too -- see models/README.md.
+llama-cpp-python>=0.3   # tested: 0.3.36

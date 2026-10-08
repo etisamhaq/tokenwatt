@@ -589,6 +589,52 @@ def test_negative_net_in_reported_domain_is_flagged():
 
 
 # ----------------------------------------------------------------- main
+
+# --- LlamaCppBackend ------------------------------------------------------
+# Section V-D runs on this backend, and none of these need llama-cpp-python or
+# the 1.1 GB of weights -- they cover the paths a reader without either hits.
+
+def test_llamacpp_rejects_unknown_precision():
+    for bad in ("bf16", "gguf-q5_k_m", ""):
+        try:
+            backends.LlamaCppBackend("/nonexistent.gguf", bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} should not be an accepted GGUF precision")
+
+
+def test_llamacpp_accepts_the_two_published_schemes():
+    # Q8_0 is the one the granularity argument rests on: 8-bit like PyTorch's
+    # per-tensor dynamic int8, so the comparison holds bit width constant.
+    assert set(backends.GGUF_PRECISIONS) == {"gguf-q4_k_m", "gguf-q8_0"}
+    for prec in backends.GGUF_PRECISIONS:
+        b = backends.LlamaCppBackend("/nonexistent.gguf", prec)
+        assert b.name == f"llamacpp/{prec}"
+
+
+def test_llamacpp_load_failure_says_what_to_do():
+    # Either the package or the weights will be missing for most readers. Both
+    # paths must name models/README.md rather than surfacing an ImportError or
+    # a raw llama.cpp abort.
+    b = backends.LlamaCppBackend("/nonexistent/weights.gguf", "gguf-q8_0")
+    try:
+        b.load()
+    except (RuntimeError, FileNotFoundError) as e:
+        assert "models/README.md" in str(e), f"unhelpful message: {e}"
+    else:
+        raise AssertionError("load() of absent weights should have raised")
+
+
+def test_llamacpp_param_bytes_is_on_disk_size():
+    import tempfile
+    b = backends.LlamaCppBackend("/nonexistent/weights.gguf", "gguf-q8_0")
+    assert b.param_bytes == 0, "a missing file must degrade to 0, not raise"
+    with tempfile.NamedTemporaryFile(suffix=".gguf") as f:
+        f.write(b"\0" * 4096)
+        f.flush()
+        assert backends.LlamaCppBackend(f.name, "gguf-q8_0").param_bytes == 4096
+
+
 def _run_all() -> int:
     fns = [(n, f) for n, f in sorted(globals().items())
            if n.startswith("test_") and callable(f)]
