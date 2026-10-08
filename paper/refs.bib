@@ -262,6 +262,146 @@
   doi     = {10.3390/en13092409}
 }
 
+
+% --- Sustainability framing: device population and grid carbon intensity ----
+@misc{gartner2025aipc,
+  author       = {{Gartner, Inc.}},
+  title        = {Gartner Says {AI} {PCs} Will Represent 31\% of Worldwide
+                  {PC} Market by the End of 2025},
+  howpublished = {Press release},
+  year         = {2025},
+  month        = aug,
+  note         = {Projects 77.8 million AI PC shipments in 2025 and 143 million
+                  in 2026; a February 2026 update defers 50\% penetration to
+                  2028. Accessed 2026-10-09}
+}
+
+@techreport{ember2026review,
+  author      = {{Ember}},
+  title       = {Global Electricity Review 2026},
+  institution = {Ember},
+  year        = {2026},
+  note        = {Global average grid emissions intensity 458\,gCO\textsubscript{2}e/kWh
+                 in 2025, down from 533 in 2015. Accessed 2026-10-09}
+}
+
+@techreport{iea2026electricity,
+  author      = {{International Energy Agency}},
+  title       = {Electricity 2026},
+  institution = {IEA},
+  year        = {2026},
+  note        = {Global CO\textsubscript{2} intensity of electricity generation
+                 estimated at 435\,g/kWh for 2025. Accessed 2026-10-09}
+}
+
+
+% --- Energy proportionality: the concept our flat-power result is an instance of
+@article{barroso2007proportional,
+  author  = {Barroso, Luiz Andr\'{e} and H\"{o}lzle, Urs},
+  title   = {The Case for Energy-Proportional Computing},
+  journal = {Computer},
+  volume  = {40},
+  number  = {12},
+  pages   = {33--37},
+  year    = {2007},
+  doi     = {10.1109/MC.2007.443}
+}
+
+% --- Sustainability of machine learning ------------------------------------
+@inproceedings{strubell2019energy,
+  author    = {Strubell, Emma and Ganesh, Ananya and McCallum, Andrew},
+  title     = {Energy and Policy Considerations for Deep Learning in {NLP}},
+  booktitle = {Proceedings of the 57th Annual Meeting of the Association for
+               Computational Linguistics (ACL)},
+  pages     = {3645--3650},
+  year      = {2019},
+  doi       = {10.18653/v1/P19-1355}
+}
+
+@article{schwartz2020greenai,
+  author  = {Schwartz, Roy and Dodge, Jesse and Smith, Noah A. and
+             Etzioni, Oren},
+  title   = {Green {AI}},
+  journal = {Communications of the ACM},
+  volume  = {63},
+  number  = {12},
+  pages   = {54--63},
+  year    = {2020},
+  doi     = {10.1145/3381831}
+}
+
+@article{henderson2020reporting,
+  author  = {Henderson, Peter and Hu, Jieru and Romoff, Joshua and
+             Brunskill, Emma and Jurafsky, Dan and Pineau, Joelle},
+  title   = {Towards the Systematic Reporting of the Energy and Carbon
+             Footprints of Machine Learning},
+  journal = {Journal of Machine Learning Research},
+  volume  = {21},
+  number  = {248},
+  pages   = {1--43},
+  year    = {2020}
+}
+
+@article{patterson2021carbon,
+  author  = {Patterson, David and Gonzalez, Joseph and Le, Quoc and
+             Liang, Chen and Munguia, Lluis-Miquel and Rothchild, Daniel and
+             So, David and Texier, Maud and Dean, Jeff},
+  title   = {Carbon Emissions and Large Neural Network Training},
+  journal = {arXiv preprint},
+  eprint  = {2104.10350},
+  archivePrefix = {arXiv},
+  year    = {2021}
+}
+
+% --- Efficient inference ----------------------------------------------------
+@inproceedings{dao2022flashattention,
+  author    = {Dao, Tri and Fu, Daniel Y. and Ermon, Stefano and
+               Rudra, Atri and R\'{e}, Christopher},
+  title     = {{FlashAttention}: Fast and Memory-Efficient Exact Attention with
+               {IO}-Awareness},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {35},
+  pages     = {16344--16359},
+  year      = {2022}
+}
+
+@inproceedings{leviathan2023speculative,
+  author    = {Leviathan, Yaniv and Kalman, Matan and Matias, Yossi},
+  title     = {Fast Inference from Transformers via Speculative Decoding},
+  booktitle = {Proceedings of the 40th International Conference on Machine
+               Learning (ICML)},
+  series    = {PMLR},
+  volume    = {202},
+  pages     = {19274--19286},
+  year      = {2023}
+}
+
+@inproceedings{xiao2023smoothquant,
+  author    = {Xiao, Guangxuan and Lin, Ji and Seznec, Mickael and Wu, Hao and
+               Demouth, Julien and Han, Song},
+  title     = {{SmoothQuant}: Accurate and Efficient Post-Training Quantization
+               for Large Language Models},
+  booktitle = {Proceedings of the 40th International Conference on Machine
+               Learning (ICML)},
+  series    = {PMLR},
+  volume    = {202},
+  pages     = {38087--38099},
+  year      = {2023}
+}
+
+@incollection{gholami2022quantsurvey,
+  author    = {Gholami, Amir and Kim, Sehoon and Dong, Zhen and Yao, Zhewei and
+               Mahoney, Michael W. and Keutzer, Kurt},
+  title     = {A Survey of Quantization Methods for Efficient Neural Network
+               Inference},
+  booktitle = {Low-Power Computer Vision},
+  pages     = {291--326},
+  publisher = {Chapman and Hall/CRC},
+  year      = {2022},
+  eprint    = {2103.13630},
+  archivePrefix = {arXiv}
+}
+
 % ---------------------------------------------------------------------------
 % TODO before submission: expand to ~40 refs. Gaps, in priority order:
 %   * heterogeneous / big.LITTLE scheduling energy studies
