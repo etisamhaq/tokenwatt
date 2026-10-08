@@ -413,7 +413,16 @@ The energy saving is real: **0.730× [0.726, 0.733]**. The quality cost makes it
 | Perplexity | 12.427 | **109.953** (+785%) |
 | Needle Retrieval | 3/3 | **0/3** |
 
-The results suggest that the issue lies not with **8-bit quantization itself**, but with the **quantization granularity**.
+**This is now tested directly, at matched bit width.** `Q8_0` (GGUF, per-block, 8-bit) against int8-dynamic (PyTorch, per-tensor, 8-bit):
+
+| scheme | bits | granularity | perplexity | vs BF16 |
+|---------|------|-------------|------------|---------|
+| BF16 | 16 | — | 12.427 | — |
+| `Q8_0` | 8 | per-block | 13.013 | **+4.7%** |
+| int8-dynamic | 8 | per-tensor | 109.953 | **+785%** |
+| `Q4_K_M` | 4 | per-block | 13.346 | +7.4% |
+
+Same bit width, 167× difference in quality damage. Halving to 4 bits with per-block scales still costs only 7.4%. The issue lies not with **8-bit quantization itself**, but with the **quantization granularity**.
 
 PyTorch Dynamic Quantization applies
 

@@ -228,9 +228,6 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
         backend.load()
         load_s = time.perf_counter() - t_load
 
-        # Thermal soak / cache warm. Discarded.
-        warmups, warm_stable = warm_until_settled(
-            backend, prompts[0], max_new_tokens)
 
         # Baseline. "run" reuses one baseline measured on a quiet machine before
         # any load; "per-config" re-measures here, but only after settling, since
@@ -243,11 +240,20 @@ def run_one(cfg: Config, model: str, max_new_tokens: int, repeats: int,
         else:
             idle_watts = run_idle_watts
 
+        # Quality BEFORE warmup, deliberately. The llama.cpp backend reloads the
+        # model inside logprobs() to enable per-position logits, which leaves it
+        # cold; measured 65 -> 45 tok/s when the warmup ran first and the
+        # quality pass afterwards. Warming last means whatever state the quality
+        # pass leaves behind is settled before any trial is timed.
         qual = None
         if run_quality:
             qual = quality_mod.evaluate(backend, corpus=corpus,
                                         needle_repeats=needle_repeats,
                                         run_needle=True)
+
+        # Thermal soak / cache warm. Discarded.
+        warmups, warm_stable = warm_until_settled(
+            backend, prompts[0], max_new_tokens)
 
         # Full cross of prompts x repeats, NOT prompts cycled by repeat index.
         # Cycling made "5 repeats" mean "4 prompts, one of them twice", so the

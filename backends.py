@@ -20,11 +20,25 @@ bytes as context extends -- one of the questions the project exists to answer.
 
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 PRECISIONS = ("fp32", "bf16", "int8-dynamic")
+
+# GGUF K-quants, served through llama.cpp. These exist to test the claim that
+# quantization GRANULARITY rather than bit width is what costs quality:
+# PyTorch dynamic int8 assigns one scale per tensor, K-quants assign scales per
+# block. Mapped to the GGUF files that provide them.
+GGUF_PRECISIONS = {
+    "gguf-q4_k_m": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    "gguf-q8_0":   "qwen2.5-0.5b-instruct-q8_0.gguf",
+}
+
+
+HERE = str(Path(__file__).resolve().parent)
 
 
 @dataclass
@@ -274,10 +288,153 @@ def npu_backend() -> Backend:
                "and /dev/accel/accel0 are present on this machine.")
 
 
+class LlamaCppBackend(Backend):
+    """GGUF inference through llama.cpp, for the K-quant comparison.
+
+    A separate engine rather than another precision of TransformersCPU, because
+    the whole point is that the quantization is done by a different toolchain
+    with a different scale granularity. Timing is kept deliberately comparable:
+    prefill is one eval() over the prompt, decode is a manual loop of
+    sample()+eval() so the two phases are measured the same way the PyTorch
+    backend measures them.
+
+    Greedy decode (temp=0) so output is deterministic and comparable with the
+    PyTorch path."""
+
+    def __init__(self, model_path: str, precision: str,
+                 threads: int | None = None, seed: int = 0):
+        if precision not in GGUF_PRECISIONS:
+            raise ValueError(f"precision must be one of {tuple(GGUF_PRECISIONS)}")
+        self.model_path = model_path
+        self.precision = precision
+        self.threads = threads
+        self.seed = seed
+        self.llm = None
+
+    @property
+    def name(self) -> str:
+        return f"llamacpp/{self.precision}"
+
+    def load(self, logits_all: bool = False) -> None:
+        """Load the model. `logits_all` retains per-position logits, which
+        perplexity needs and which costs roughly half the decode throughput
+        (measured: 68.6 -> 32.7 tok/s). Timed generation therefore always runs
+        with it off, and logprobs() reloads around its own measurement."""
+        from llama_cpp import Llama
+        self._logits_all = logits_all
+        self.llm = Llama(
+            model_path=self.model_path,
+            n_ctx=4096,
+            n_threads=self.threads or os.cpu_count(),
+            n_batch=512,
+            seed=self.seed,
+            logits_all=logits_all,
+            verbose=False,
+        )
+
+    @property
+    def param_bytes(self) -> int:
+        """On-disk size of the quantized weights. Not directly comparable with
+        the PyTorch backend's in-memory parameter count, and labelled as such."""
+        try:
+            return os.path.getsize(self.model_path)
+        except OSError:
+            return 0
+
+    def generate(self, prompt: str, max_new_tokens: int) -> GenResult:
+        llm = self.llm
+        llm.reset()
+        ids = llm.tokenize(prompt.encode("utf-8"))
+        n_prompt = len(ids)
+
+        t0 = time.perf_counter()
+        llm.eval(ids)                      # prefill: whole prompt, one pass
+        prefill_s = time.perf_counter() - t0
+
+        out, step_s = [], []
+        eos = llm.token_eos()
+        t_dec = time.perf_counter()
+        for _ in range(max_new_tokens):
+            t = time.perf_counter()
+            tok = llm.sample(temp=0.0)     # greedy, for determinism
+            if tok == eos:
+                break
+            llm.eval([tok])
+            step_s.append(time.perf_counter() - t)
+            out.append(tok)
+        decode_s = time.perf_counter() - t_dec
+
+        text = llm.detokenize(out).decode("utf-8", errors="replace")
+        # llama.cpp manages its KV cache internally and does not expose a
+        # per-step byte count. Recorded as empty rather than estimated, so the
+        # analysis cannot mistake a model for a measurement.
+        return GenResult(text=text, n_prompt_tokens=n_prompt,
+                         n_new_tokens=len(out), prefill_s=prefill_s,
+                         decode_s=decode_s, decode_step_s=step_s,
+                         kv_bytes_final=0, kv_bytes_by_step=[])
+
+    def logprobs(self, text: str, stride: int = 512) -> tuple[float, int]:
+        """Total log-likelihood over `text`, windowed like the PyTorch path.
+
+        Computed from the raw logits rather than through create_completion's
+        echo mode, which returns values near-uniform over the vocabulary in
+        this llama-cpp-python release (measured perplexity 5e5 against 11.4
+        from the logits, on identical text) -- it is not usable for this.
+
+        Reloads the model with logits_all on and restores it afterwards, so a
+        timed generation never runs under the configuration that halves decode
+        throughput."""
+        import numpy as np
+
+        was_logits_all = getattr(self, "_logits_all", False)
+        if not was_logits_all:
+            self.unload()
+            self.load(logits_all=True)
+        try:
+            llm = self.llm
+            ids = llm.tokenize(text.encode("utf-8"))
+            window = min(stride, llm.n_ctx() - 8)
+            total, n = 0.0, 0
+            for start in range(0, len(ids), window):
+                chunk = ids[start:start + window]
+                if len(chunk) < 2:
+                    continue
+                llm.reset()
+                llm.eval(chunk)
+                sc = np.asarray(llm.scores[:len(chunk)], dtype=np.float64)
+                # log-softmax per position, scored against the token that
+                # actually followed. Max-subtracted for numerical stability.
+                rows = sc[:-1]
+                rows = rows - rows.max(axis=1, keepdims=True)
+                lse = np.log(np.exp(rows).sum(axis=1))
+                picked = rows[np.arange(len(rows)), np.asarray(chunk[1:])]
+                total += float((picked - lse).sum())
+                n += len(rows)
+            return total, n
+        finally:
+            if not was_logits_all:
+                self.unload()
+                self.load(logits_all=False)
+
+    def unload(self) -> None:
+        self.llm = None
+
+
 def make_backend(engine: str, model_id: str, precision: str,
                  threads: int | None = None, seed: int = 0) -> Backend:
     if engine == "cpu":
         return TransformersCPU(model_id, precision, threads, seed)
+    if engine == "llamacpp":
+        fname = GGUF_PRECISIONS.get(precision)
+        if fname is None:
+            raise ValueError(f"precision must be one of {tuple(GGUF_PRECISIONS)}")
+        path = os.path.join(HERE, "models", fname)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"GGUF not found at {path}. Download it from the "
+                f"Qwen2.5-0.5B-Instruct-GGUF repository before running the "
+                f"llamacpp engine.")
+        return LlamaCppBackend(path, precision, threads, seed)
     if engine == "igpu":
         return igpu_backend()
     if engine == "npu":

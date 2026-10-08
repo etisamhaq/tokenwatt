@@ -195,6 +195,52 @@ parallelism, because the bottleneck is off-core. The penalty is largest for
 int8, the precision that does the most arithmetic per byte and so contends
 hardest.
 
+## 10. Granularity, not bit width -- tested at matched bit width
+
+Section 4 argued that per-tensor scaling rather than 8-bit arithmetic was the
+problem. Comparing per-tensor int8 against a per-block 4-bit scheme would vary
+two things at once, so we added `Q8_0`: per-block, at **the same eight bits**.
+Bit width is then fixed and only granularity differs.
+
+| scheme | engine | bits | granularity | perplexity | vs bf16 |
+| --- | --- | --- | --- | --- | --- |
+| bf16 | PyTorch | 16 | -- | 12.427 | -- |
+| `Q8_0` | llama.cpp | 8 | per-block | 13.013 | **+4.7%** |
+| int8-dynamic | PyTorch | 8 | per-tensor | 109.953 | **+785%** |
+| `Q4_K_M` | llama.cpp | 4 | per-block | 13.346 | +7.4% |
+
+At eight bits, per-block costs 4.7% and per-tensor costs 785%: a factor of
+**167** in quality damage from granularity alone, bit width held constant.
+Halving to four bits with per-block scales costs 7.4% -- still two orders of
+magnitude less than the 8-bit per-tensor scheme. Bit width is not the operative
+variable; granularity is.
+
+## 11. The flat-power result reproduces on a second engine
+
+llama.cpp is a different runtime with its own kernels, written in C++ rather
+than dispatched through PyTorch. It shows the same invariance:
+
+| scheme | P-1t | LP-E | energy ratio | 1/throughput | agreement |
+| --- | --- | --- | --- | --- | --- |
+| `Q4_K_M` | 31.7 tok/s @ 14.01 W | 19.5 @ 14.01 W | 1.660x | 1.678 | -1.07% |
+| `Q8_0` | 30.1 tok/s @ 14.00 W | 16.4 @ 13.97 W | 1.876x | 1.884 | -0.43% |
+
+Gross package power is 13.99-14.01 W across both schemes and both islands,
+spanning 16.4 to 31.7 tok/s -- against 14.00 W measured under PyTorch. Four
+independent observations of the same figure now, on two engines and two models.
+The duration identity holds to within 1.1% here too.
+
+The island penalty is smaller under llama.cpp (1.66-1.88x against 2.306x for
+bf16/PyTorch), which is expected: the ratio depends on how completely an engine
+exploits the performance cores. The direction and mechanism are unchanged; the
+magnitude is engine-dependent and should be reported as such.
+
+> **Cross-engine energy numbers are not controlled.** llama.cpp is simply a
+> faster engine, so comparing its J/token against PyTorch's confounds
+> quantization with implementation. The within-engine comparisons above and the
+> perplexity table in section 10 are unaffected -- every perplexity is scored
+> over the same corpus with the same tokenizer.
+
 ## What changed from the 24-token dataset, and why
 
 | claim | 24-token result | 256-token result | verdict |

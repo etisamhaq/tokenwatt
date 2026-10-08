@@ -1,0 +1,12 @@
+{
+  "gguf-q4_k_m": {
+    "logprob_sum": -2541.972730329263,
+    "n_tokens": 981,
+    "perplexity": 13.34585216663253
+  },
+  "gguf-q8_0": {
+    "logprob_sum": -2517.1935127565407,
+    "n_tokens": 981,
+    "perplexity": 13.012969268397772
+  }
+}

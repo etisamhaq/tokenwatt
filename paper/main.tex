@@ -569,6 +569,24 @@ several accounts. An account that also predicts \emph{where} flatness should
 fail, and is then confirmed by the one precision that departs from it, is a
 mechanism.
 
+A second engine supports the same conclusion. Running GGUF models through
+llama.cpp---a different runtime with its own kernels, written in C++ rather
+than dispatched through PyTorch---reproduces the invariance: gross package
+power is 14.01\,W for \texttt{Q4\_K\_M} and 13.99\,W for \texttt{Q8\_0},
+spanning 16.4 to 31.7\,tok/s across the two islands, against the 14.00\,W
+measured under PyTorch. The duration identity holds there too, to within 1.1\%
+($1.660\times$ energy against $1.678$ inverse throughput for
+\texttt{Q4\_K\_M}; $1.876$ against $1.884$ for \texttt{Q8\_0}). The flatness is
+therefore a property of the platform under this workload rather than of one
+inference framework.
+
+The island penalty itself is smaller under llama.cpp ($1.66$--$1.88\times$
+against $2.306\times$ for bf16 under PyTorch), which is expected: the ratio
+depends on how completely an engine exploits the performance cores, and a
+faster engine widens the gap it must then be penalised against. The direction
+and the mechanism are unchanged; only the magnitude is engine-dependent, and we
+report it as such.
+
 \subsection{Precision, and its interaction with placement}
 \label{sec:precision}
 On the performance cores, fp32 costs $1.319\times$ [1.309, 1.330] the energy of
@@ -610,11 +628,53 @@ saving is nonetheless unusable. Perplexity rises from 12.427 to 109.953, an
 increase of 785\%, and needle retrieval falls from 3/3 to 0/3.
 
 The result is therefore a cost--quality trade rather than an absence of
-benefit, and the operative variable is quantization \emph{granularity} rather
-than bit width. PyTorch dynamic quantization assigns one scale per tensor;
-per-block and per-channel schemes hold quality at bit widths far below eight
-(Section~\ref{sec:background}). Evaluating those schemes on this platform is
-the obvious next experiment.
+benefit. The question it raises is whether eight bits is simply too few, or
+whether the fault lies in how the scale is assigned. We test this directly.
+
+\subsection{Granularity, not bit width}
+\label{sec:granularity}
+Comparing a per-tensor 8-bit scheme against a per-block 4-bit scheme would vary
+two things at once. We therefore add \texttt{Q8\_0}, a GGUF per-block scheme at
+\emph{the same eight bits} as PyTorch's dynamic quantization, served through
+llama.cpp. Bit width is then held constant and only granularity differs
+(Table~\ref{tab:granularity}).
+
+\begin{table}[t]
+\centering
+\caption{Quantization quality at matched bit width. \texttt{Q8\_0} and
+int8-dynamic are both 8-bit and differ only in whether the scale is assigned
+per block or per tensor. Perplexity over the same corpus and tokenizer in every
+row.}
+\label{tab:granularity}
+\begin{tabular}{llrrr}
+\toprule
+Scheme & Engine & Bits & Granularity & $\Delta$ perplexity \\
+\midrule
+bf16         & PyTorch   & 16 & ---         & --- \\
+\texttt{Q8\_0}   & llama.cpp & 8  & per-block   & $+4.7\%$ \\
+int8-dynamic & PyTorch   & 8  & per-tensor  & $\mathbf{+785\%}$ \\
+\texttt{Q4\_K\_M} & llama.cpp & 4  & per-block   & $+7.4\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At eight bits, per-block scaling costs 4.7\% perplexity and per-tensor scaling
+costs 785\%: a factor of 167 in quality damage attributable to granularity
+alone, with bit width fixed. Halving the bit width to four, while keeping
+per-block scales, costs 7.4\%---still two orders of magnitude less than the
+8-bit per-tensor scheme. Bit width is not the operative variable on this
+workload; granularity is. The finding is consistent with the quantization
+literature~\cite{dettmers2022llmint8,frantar2023gptq,lin2024awq,
+xiao2023smoothquant,gholami2022quantsurvey}, and we contribute the energy
+accounting rather than the scheme.
+
+Two caveats bound what this comparison supports. The per-block schemes are
+served by a different runtime, so any \emph{energy} difference between engines
+confounds quantization with implementation and we do not report one as a
+finding; the perplexity comparison is unaffected, since every row is scored
+over the same corpus with the same tokenizer. And a quality probe this thin
+(Section~\ref{sec:method}) establishes that a scheme has not collapsed, not
+that it is equivalent to full precision.
 
 \subsection{Quantization does not shrink the KV cache}
 Dynamic quantization touches only Linear weights, so the KV cache remains at

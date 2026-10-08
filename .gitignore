@@ -7,3 +7,15 @@ __pycache__/
 # Working notes, not artifact content
 PLAN.md
 PAPER_OUTLINE.md
+
+# GGUF weights: 1.1 GB, over GitHub's 100 MB per-file limit, and re-downloadable.
+# See models/README.md for how to fetch them.
+models/*.gguf
+models/*.log
+
+# LaTeX build artefacts. The PDFs are committed; the intermediates are not.
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.out
+paper/*.toc
