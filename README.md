@@ -7,15 +7,47 @@
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux-green.svg)
 ![PyTorch](https://img.shields.io/badge/PyTorch-CPU-orange.svg)
-![Tests](https://img.shields.io/badge/Tests-58%20Passing-success.svg)
+![Tests](https://img.shields.io/badge/Tests-64%20Passing-success.svg)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23243516.svg)](https://doi.org/10.5281/zenodo.23243516)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)
 
 </p>
 
 ---
 
+# At a Glance
+
+**On an Intel Core Ultra 7 155H, the low-power "efficiency" cores used 2.31× more energy per generated token than the performance cores** (95% CI [2.301, 2.314]) when running a small language model. They drew the same power and ran 2.3× slower. The energy cost is simply the extra time spent running: race-to-idle.
+
+| Finding | Number |
+|---|---|
+| LP-E vs P-core energy per token (BF16, Qwen2.5-0.5B) | **2.31×** more on LP-E |
+| Package power across every FP32/BF16 placement | **14.00 W** (differs by < 0.1%) |
+| Energy ratio vs inverse throughput ratio | matches within **1.1%** |
+| BF16 vs FP32 on P-cores | **1.32×** less energy, same quality |
+| INT8 dynamic quantization | **27% cheaper**, but perplexity 12.4 → **110** and needle retrieval 3/3 → **0/3** |
+
+<p align="center">
+  <img src="runs/qwen2.5-0.5b-v3/figures/paired_ratios.png" alt="Paired per-prompt energy-per-token ratios with bootstrap 95% confidence intervals: LP-E cores cost about 2.3 times the P-cores, FP32 costs more than BF16, INT8 dynamic costs less" width="760">
+</p>
+
+**Dataset:** 240 RAPL measurements = 12 configurations (3 precisions × 4 core placements) × 4 fixed prompts × 5 true repeats, 256 generated tokens each, idle baseline subtracted. Every discarded run is kept under `runs/discarded/` with the reason it was rejected.
+
+**Reproduce:**
+
+```bash
+make test          # 64 unit tests, no model download needed
+make check         # CPU topology, power islands and RAPL access
+make sweep-big     # re-measures the full 240-row Qwen2.5-0.5B dataset
+```
+
+**Cite:** use the concept DOI [10.5281/zenodo.23243516](https://doi.org/10.5281/zenodo.23243516), which always resolves to the latest version. `CITATION.cff` gives the full citation (GitHub's "Cite this repository" button reads it).
+
+---
+
 # Table of Contents
 
+- [At a Glance](#at-a-glance)
 - [Overview](#overview)
 - [Research Question](#research-question)
 - [Key Features](#key-features)
@@ -552,7 +584,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 make test
 ```
 
-Runs all **39 unit tests**.
+Runs all **64 unit tests**.
 
 No model download is required.
 
