@@ -24,6 +24,11 @@
 \newif\ifanon
 \anontrue
 
+% Public preprint (`make preprint`): the named version without the affiliation,
+% with a running head that says it is under submission rather than published.
+\newif\ifpreprint
+\ifdefined\preprintmode \preprinttrue \anonfalse \fi
+
 \newif\ifdraftmode
 \draftmodefalse
 \ifdraftmode
@@ -49,16 +54,27 @@ for LLM Decode on x86 Heterogeneous SoCs}
   {Anonymous Submission: Race to Idle}
 \else
   \author{Muhammad~Etisam~Ul~Haq%
+  \ifpreprint\else
   \thanks{M. E. Ul Haq is with the Institute of Data Science, University of
   Engineering and Technology, Lahore, Pakistan
   (e-mail: 2026SMSDS122@student.uet.edu.pk).}%
+  \fi
   \thanks{ORCID: \url{https://orcid.org/0009-0008-5016-6478}.}%
   \thanks{Artifact, including the measurement harness, the complete dataset and
   every discarded run, is archived at
   \href{https://doi.org/10.5281/zenodo.23243516}{doi:10.5281/zenodo.23243516}
-  (concept DOI; resolves to the latest version).}}
-  \markboth{IEEE Transactions on Sustainable Computing}%
-  {Ul Haq: Race to Idle}
+  (concept DOI; resolves to the latest version).}%
+  \ifpreprint
+  \thanks{Preprint. This work has been submitted to IEEE Transactions on
+  Sustainable Computing for possible publication.}%
+  \fi}
+  \ifpreprint
+    \markboth{Preprint, submitted to IEEE Transactions on Sustainable Computing}%
+    {Ul Haq: Race to Idle}
+  \else
+    \markboth{IEEE Transactions on Sustainable Computing}%
+    {Ul Haq: Race to Idle}
+  \fi
 \fi
 
 \maketitle
@@ -1208,9 +1224,10 @@ dataset---because the reason a measurement was discarded is part of the method.
 % wanted for the camera-ready version.
 \begin{IEEEbiographynophoto}{Muhammad Etisam Ul Haq}
 received the B.S. degree in data science from the Punjab University College of
-Information Technology (PUCIT), University of the Punjab, Lahore, Pakistan, and
+Information Technology (PUCIT), University of the Punjab, Lahore, Pakistan%
+\ifpreprint.\else, and
 is currently pursuing the M.S. degree in data science at the Institute of Data
-Science, University of Engineering and Technology, Lahore, Pakistan.
+Science, University of Engineering and Technology, Lahore, Pakistan.\fi
 
 He works as a machine learning engineer, where his practice covers large
 language model fine-tuning and inference serving, retrieval-augmented

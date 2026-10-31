@@ -17,6 +17,8 @@
 
 # At a Glance
 
+> **Paper:** [*Race to Idle: Efficiency Cores Do Not Save Energy for LLM Decode on x86 Heterogeneous SoCs*](https://etisamhaq.github.io/research/race-to-idle). Preprint, under review at IEEE Transactions on Sustainable Computing. This repository is its artifact.
+
 **On an Intel Core Ultra 7 155H, the low-power "efficiency" cores used 2.31× more energy per generated token than the performance cores** (95% CI [2.301, 2.314]) when running a small language model. They drew the same power and ran 2.3× slower. The energy cost is simply the extra time spent running: race-to-idle.
 
 | Finding | Number |
@@ -41,7 +43,7 @@ make check         # CPU topology, power islands and RAPL access
 make sweep-big     # re-measures the full 240-row Qwen2.5-0.5B dataset
 ```
 
-**Cite:** use the concept DOI [10.5281/zenodo.23243516](https://doi.org/10.5281/zenodo.23243516), which always resolves to the latest version. `CITATION.cff` gives the full citation (GitHub's "Cite this repository" button reads it).
+**Cite:** cite the paper for the findings and the concept DOI [10.5281/zenodo.23243516](https://doi.org/10.5281/zenodo.23243516) for the code and data; the DOI always resolves to the latest version. `CITATION.cff` gives both (GitHub's "Cite this repository" button reads it). `make preprint` rebuilds the paper PDF from `paper/main.tex`.
 
 ---
 

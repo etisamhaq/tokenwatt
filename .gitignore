@@ -19,4 +19,8 @@ paper/*.bbl
 paper/*.blg
 paper/*.out
 paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+# Built by `make preprint`; the published copy is hosted on the author's site.
+paper/race-to-idle-preprint.pdf
 submission/

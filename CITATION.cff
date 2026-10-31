@@ -12,8 +12,6 @@ type: software
 authors:
   - given-names: Muhammad Etisam
     family-names: Ul Haq
-    affiliation: "Institute of Data Science, University of Engineering and Technology, Lahore"
-    email: 2026SMSDS122@student.uet.edu.pk
     orcid: "https://orcid.org/0009-0008-5016-6478"
 repository-code: "https://github.com/etisamhaq/tokenwatt"
 doi: "10.5281/zenodo.23243516"  # concept DOI -- always resolves to the latest version
@@ -28,3 +26,14 @@ keywords:
   - sustainable computing
 version: "1.0.3"
 date-released: "2026-10-09"
+preferred-citation:
+  type: article
+  title: "Race to Idle: Efficiency Cores Do Not Save Energy for LLM Decode on x86 Heterogeneous SoCs"
+  authors:
+    - given-names: Muhammad Etisam
+      family-names: Ul Haq
+      orcid: "https://orcid.org/0009-0008-5016-6478"
+  year: 2026
+  status: preprint
+  notes: "Under review at IEEE Transactions on Sustainable Computing"
+  url: "https://etisamhaq.github.io/research/race-to-idle"

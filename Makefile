@@ -1,4 +1,4 @@
-.PHONY: help test check sweep sweep-big sweep-longctx sweep-kquant kquant-perplexity reproduce analyze clean rapl idle
+.PHONY: help test check sweep sweep-big sweep-longctx sweep-kquant kquant-perplexity reproduce analyze preprint clean rapl idle
 .DEFAULT_GOAL := help
 
 PY      ?= python3
@@ -27,6 +27,7 @@ help:
 	@echo "make kquant-perplexity quality for the GGUF schemes, measured separately"
 	@echo "make reproduce   all published runs (~5 h)"
 	@echo "make analyze     regenerate RESULTS.md and figures/ from results.jsonl"
+	@echo "make preprint    build the public preprint PDF (needs LaTeX)"
 	@echo "make clean       remove generated results, figures and caches"
 
 test:
@@ -105,6 +106,12 @@ reproduce: sweep-big sweep sweep-longctx sweep-kquant kquant-perplexity
 analyze:
 	$(PY) analyze.py --results runs/qwen2.5-0.5b-v3/results.jsonl \
 	  --report runs/qwen2.5-0.5b-v3/RESULTS.md --outdir runs/qwen2.5-0.5b-v3/figures
+
+# Public preprint: named, no affiliation, "submitted to" running head.
+# paper/main.pdf stays the anonymized review copy.
+preprint:
+	cd paper && latexmk -pdf -interaction=nonstopmode -jobname=race-to-idle-preprint \
+	  -pdflatex='pdflatex %O "\def\preprintmode{}\input{%S}"' main.tex
 
 clean:
 	rm -rf __pycache__ tests/__pycache__ *.log
