@@ -514,16 +514,22 @@ Five superseded datasets include dedicated documentation explaining why the meas
 
 ```
 .
-├── analyze.py
-├── backends.py
-├── chat.py
-├── corpus.txt
-├── energy.py
-├── quality.py
-├── runner.py
-├── topology.py
-├── tests/
-├── runs/
+├── analyze.py              # statistics, RESULTS.md and figures from results.jsonl
+├── backends.py             # PyTorch and llama.cpp inference backends
+├── chat.py                 # interactive chat at a chosen precision and placement (not measured)
+├── corpus.txt              # perplexity corpus
+├── energy.py               # RAPL counters and idle-power measurement
+├── kquant_perplexity.py    # quality for the GGUF K-quant schemes (Section V-D)
+├── quality.py              # perplexity and needle probe
+├── runner.py               # the measurement sweep
+├── topology.py             # CPU island discovery
+├── tests/                  # unit suite, no model or RAPL access needed
+├── runs/                   # every published run, plus runs/discarded/ with reasons
+├── models/                 # README with how to fetch the GGUF weights
+├── paper/                  # LaTeX source, figures and the review PDF
+├── Makefile                # make help lists every target
+├── requirements.txt
+├── CITATION.cff
 └── FINDINGS.md
 ```
 
